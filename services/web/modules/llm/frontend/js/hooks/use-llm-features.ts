@@ -33,6 +33,14 @@ let cache: Features | null = null
 let inflight: Promise<Features> | null = null
 
 function fetchFeatures(): Promise<Features> {
+  if (!getMeta('ol-ExposedSettings')?.llmEnabled)
+    return Promise.resolve({
+      chatEnabled: false,
+      completionEnabled: false,
+      reviewEnabled: false,
+      allowUserSettings: false,
+      loaded: true,
+    })
   if (inflight) return inflight
 
   const projectId = getMeta('ol-project_id')

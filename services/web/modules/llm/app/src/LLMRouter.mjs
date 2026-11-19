@@ -1,3 +1,4 @@
+import LLMComplianceController from './LLMComplianceController.mjs'
 // プロジェクトの読取権限、本人ログイン、サイト管理者権限を入口で検証します。
 // 個人接続の許可は設定ハンドラーでも検証し、URL直アクセスによる迂回を防ぎます。
 
@@ -11,6 +12,72 @@ import LLMAdminController from './LLMAdminController.mjs'
 
 export default {
   apply(webRouter) {
+    webRouter.post(
+      '/project/:Project_id/llm/compile-fix',
+      AuthorizationMiddleware.ensureUserCanReadProject,
+      LLMChatController.compileFix
+    )
+    webRouter.get(
+      '/project/:Project_id/llm/source-context',
+      AuthorizationMiddleware.ensureUserCanReadProject,
+      LLMChatController.getSourceContext
+    )
+    webRouter.get(
+      '/project/:Project_id/llm/prompts',
+      AuthorizationMiddleware.ensureUserCanReadProject,
+      LLMChatController.getPrompts
+    )
+    webRouter.post(
+      '/project/:Project_id/llm/completion',
+      AuthorizationMiddleware.ensureUserCanReadProject,
+      LLMChatController.completion
+    )
+    webRouter.post(
+      '/project/:Project_id/llm/generate',
+      AuthorizationMiddleware.ensureUserCanReadProject,
+      LLMChatController.generateDocument
+    )
+    webRouter.get(
+      '/project/:Project_id/llm/compliance/rubrics',
+      AuthorizationMiddleware.ensureUserCanReadProject,
+      LLMComplianceController.getRubrics
+    )
+    webRouter.post(
+      '/project/:Project_id/llm/compliance/start',
+      AuthorizationMiddleware.ensureUserCanReadProject,
+      LLMComplianceController.startReview
+    )
+    webRouter.get(
+      '/project/:Project_id/llm/compliance/status/:jobId',
+      AuthorizationMiddleware.ensureUserCanReadProject,
+      LLMComplianceController.statusReview
+    )
+    webRouter.post(
+      '/project/:Project_id/llm/compliance/cancel/:jobId',
+      AuthorizationMiddleware.ensureUserCanReadProject,
+      LLMComplianceController.cancelReview
+    )
+    webRouter.get(
+      '/user/llm/compliance',
+      AuthenticationController.requireLogin(),
+      LLMSettingsController.getUserCompliance
+    )
+    webRouter.post(
+      '/user/llm/compliance',
+      AuthenticationController.requireLogin(),
+      LLMSettingsController.saveUserCompliance
+    )
+    webRouter.get(
+      '/user/llm-translation-settings',
+      AuthenticationController.requireLogin(),
+      LLMSettingsController.getTranslationSettings
+    )
+    webRouter.post(
+      '/user/llm-translation-settings',
+      AuthenticationController.requireLogin(),
+      LLMSettingsController.saveTranslationSettings
+    )
+
     logger.info(
       {
         allowUserSettings: Settings.llm?.allowUserSettings,

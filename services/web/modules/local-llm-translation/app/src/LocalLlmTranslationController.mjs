@@ -187,7 +187,7 @@ async function proxy(req, res, { path, method = 'GET', body, projectId }) {
  */
 function waitForWritable(res) {
   if (res.destroyed || res.writableEnded) return Promise.resolve()
-  return new Promise((resolve) => {
+  return new Promise(resolve => {
     const finish = () => {
       res.off('drain', finish)
       res.off('close', finish)
@@ -384,10 +384,40 @@ export default {
   /** 翻訳を開始し、SSE を中継します。 */
   translate: expressify(async (req, res) => {
     const { params, body } = parseReq(req, translateSchema)
+    const payload = { ...body }
+    if (process.env.LLM_ENABLED === 'true') {
+      // キーは本人の設定からサーバー側だけで解決します。ブラウザー由来の
+      // 接続URL・キーはスキーマで受け付けず、既存の認証済み中継を使います。
+      try {
+        const { resolveTranslationOverride } =
+          await import('../../../llm/app/src/LLMSettingsController.mjs')
+        const override = await resolveTranslationOverride(
+          SessionManager.getLoggedInUserId(req.session)
+        )
+        if (override) {
+          payload.llm_base_url = override.baseUrl
+          payload.llm_api_key = override.apiKey
+          payload.llm_minimal_prompt = override.minimal
+          payload.llm_chunk_chars =
+            override.chunkChars >= 200 ? override.chunkChars : null
+          if (override.model) payload.model = override.model
+        }
+      } catch (error) {
+        // 削除済み接続先や設定取得エラーで、別のモデルへ原文を送らないよう止めます。
+        return res
+          .status(error.status || 503)
+          .json({
+            message:
+              error.status === 409
+                ? error.message
+                : '翻訳用の接続設定を取得できませんでした。もう一度お試しください。',
+          })
+      }
+    }
     return streamTranslation(req, res, {
       path: `/projects/${params.Project_id}/translate`,
       projectId: params.Project_id,
-      body,
+      body: payload,
     })
   }),
 
@@ -475,12 +505,10 @@ export default {
       })
     }
     // 英語版名の衝突を種類ごとに確認します（ファイル・フォルダー同名は作成不可）。
-    const existingDoc = folder.docs.find((doc) => doc.name === englishName)
-    const existingFile = folder.fileRefs.find(
-      (file) => file.name === englishName
-    )
+    const existingDoc = folder.docs.find(doc => doc.name === englishName)
+    const existingFile = folder.fileRefs.find(file => file.name === englishName)
     const existingFolder = folder.folders.find(
-      (candidate) => candidate.name === englishName
+      candidate => candidate.name === englishName
     )
     if (existingFile) {
       return res.status(409).json({

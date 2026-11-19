@@ -117,6 +117,12 @@ class TranslationRequest(BaseModel):
 
     text: str = Field(min_length=1)
     model: str | None = Field(default=None, max_length=256)
+    # Overleafが本人の設定から注入する内部用の接続指定です。キーを応答へ返しません。
+    llm_base_url: str | None = Field(default=None, max_length=500)
+    llm_api_key: str = Field(default="", max_length=2000)
+    llm_minimal_prompt: bool = False
+    llm_chunk_chars: int | None = Field(default=None, ge=200, le=200000)
+
 
 
 class EndpointTest(BaseModel):
@@ -183,8 +189,14 @@ def _validated_base_url(value: str) -> str:
     return cleaned
 
 
-def _effective_llm_settings(endpoint_id: str | None = None) -> Connection:
+def _effective_llm_settings(endpoint_id: str | None = None, override: TranslationRequest | None = None) -> Connection:
     """プロジェクト指定 → 標準接続先 → 環境変数の順で解決します。"""
+    # 個人接続は共有接続より優先し、キー空欄の場合も共有・環境変数のキーを流用しません。
+    if override and override.llm_base_url:
+        headers = {"Accept": "application/json"}
+        if override.llm_api_key:
+            headers["Authorization"] = f"Bearer {override.llm_api_key}"
+        return (_validated_base_url(override.llm_base_url), headers, {}, override.llm_minimal_prompt, override.llm_chunk_chars)
     resolved = database.get_endpoint_credentials(endpoint_id) if endpoint_id else database.get_default_endpoint_credentials()
     if endpoint_id and resolved is None:
         # 削除済みの選択を黙って別の送信先へ切り替えません。
@@ -779,10 +791,13 @@ async def translate(project_id: str, request: TranslationRequest) -> StreamingRe
     # （接続先解決失敗時は通常 mode・既定サイズで進め、実際の接続エラーは
     #   ストリーム側で報告されます。）
     try:
-        effective = _effective_llm_settings(endpoint_id)
+        effective = _effective_llm_settings(endpoint_id, override=request)
         minimal_prompt = effective[3]
         endpoint_chunk_chars = effective[4]
     except HTTPException:
+        # 個人接続の検証失敗を共有接続へ降格せず、原文の送信前に拒否します。
+        if request.llm_base_url:
+            raise
         effective = None
         minimal_prompt = False
         endpoint_chunk_chars = None

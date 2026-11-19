@@ -64,10 +64,14 @@ test('provider check and scan precede dynamic provider ids', () => {
       paths.indexOf('/user/llm-providers/:id')
   )
 })
-test('unfinished editing and review features are not exposed', () => {
-  assert.ok(
-    !routes.some(route =>
-      /compile-fix|\/completion$|\/generate$|\/compliance\//.test(route.path)
-    )
-  )
+test('editing, review and translation settings routes are registered', () => {
+  const paths = routes.map(route => route.path)
+  for (const path of [
+    '/project/:Project_id/llm/compile-fix',
+    '/project/:Project_id/llm/completion',
+    '/project/:Project_id/llm/generate',
+    '/project/:Project_id/llm/compliance/start',
+    '/user/llm-translation-settings',
+  ])
+    assert.ok(paths.includes(path), path)
 })

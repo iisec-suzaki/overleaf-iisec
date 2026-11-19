@@ -222,7 +222,14 @@ const LLMChatPane = React.memo(function LLMChatPane({
             {displayMessages.map((msg, idx) => (
               <div key={idx} className={`llm-message llm-message-${msg.role}`}>
                 <div className="message-container">
-                  <LLMChatResponse content={msg.content} />
+                  <LLMChatResponse
+                    content={msg.content}
+                    assistant={msg.role === 'assistant'}
+                    autoPreview={
+                      msg.role === 'assistant' &&
+                      idx === displayMessages.length - 1
+                    }
+                  />
                   {msg.contextWarning && (
                     <div role="status" className="llm-context-status">
                       {msg.contextWarning}

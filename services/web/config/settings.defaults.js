@@ -1035,14 +1035,33 @@ module.exports = {
     sourceEditorExtensions: [
       Path.resolve(
         __dirname,
+        '../modules/llm/frontend/js/extensions/llm-inline-completion'
+      ),
+      Path.resolve(
+        __dirname,
         '../modules/bib-editor/frontend/js/extensions/bib-editor-extension.ts'
       ),
     ],
     sourceEditorVisualExtensions: [],
-    // チャット送信時にだけ編集中の本文を読み取る中継。
-    sourceEditorComponents: [Path.resolve(__dirname, '../modules/llm/frontend/js/components/llm-editor-context.tsx')],
-    pdfLogEntryHeaderActionComponents: [],
-    pdfLogEntryComponents: [],
+    // 本文の参照・差分プレビュー・適用を、現在のメイン文書へ結び付けます。
+    sourceEditorComponents: [
+      Path.resolve(
+        __dirname,
+        '../modules/llm/frontend/js/components/llm-source-editor-component.tsx'
+      ),
+    ],
+    pdfLogEntryHeaderActionComponents: [
+      Path.resolve(
+        __dirname,
+        '../modules/llm/frontend/js/components/pdf-log-entry-ask-ai-button'
+      ),
+    ],
+    pdfLogEntryComponents: [
+      Path.resolve(
+        __dirname,
+        '../modules/llm/frontend/js/components/pdf-llm-compile-fix-card'
+      ),
+    ],
     pdfLogEntriesComponents: [],
     pdfPreviewPromotions: [],
     diagnosticActions: [],
@@ -1053,7 +1072,12 @@ module.exports = {
         '../modules/symbol-palette/frontend/components/symbol-palette'
       ),
     ],
-    sourceEditorToolbarStartButtons: [],
+    sourceEditorToolbarStartButtons: [
+      Path.resolve(
+        __dirname,
+        '../modules/llm/frontend/js/extensions/llm-editor-toolbar-ask-ai'
+      ),
+    ],
     sourceEditorToolbarButtonGroups: [],
     // メインエディターの状態を翻訳レールへ中継し、横並び表示の入口を登録します。
     sourceEditorToolbarComponents: [
@@ -1120,15 +1144,24 @@ module.exports = {
     menubarExtraComponents: [
       Path.resolve(
         __dirname,
+        '../modules/llm/frontend/js/extensions/llm-file-menu-commands'
+      ),
+      Path.resolve(
+        __dirname,
         '../modules/template-gallery/frontend/js/features/template/components/menubar-manage-template'
       ),
     ],
-    insertMenuSections: [],
+    insertMenuSections: [
+      Path.resolve(
+        __dirname,
+        '../modules/llm/frontend/js/extensions/llm-insert-menu-section'
+      ),
+    ],
     oauth2Server: [
       Path.resolve(
         __dirname,
         '../modules/git-bridge/frontend/js/widget/components/git-integration-widget.tsx'
-      )
+      ),
     ],
     personalMcpTokens: [
       Path.resolve(
@@ -1205,7 +1238,12 @@ module.exports = {
     referenceSearchSetting: [],
     settingsModalEditorTabSections: [],
     settingsModalSpellcheckSections: [],
-    editorFloatingMenuActions: [],
+    editorFloatingMenuActions: [
+      Path.resolve(
+        __dirname,
+        '../modules/llm/frontend/js/extensions/llm-fm-ask-ai'
+      ),
+    ],
     errorLogsComponents: [],
     referenceIndices: [
       Path.resolve(
@@ -1214,7 +1252,10 @@ module.exports = {
       ),
     ],
     railEntries: [
-      Path.resolve(__dirname, '../modules/llm/frontend/js/components/llm-rail-pane.tsx'),
+      Path.resolve(
+        __dirname,
+        '../modules/llm/frontend/js/components/llm-rail-pane.tsx'
+      ),
       Path.resolve(
         __dirname,
         '../modules/local-llm-translation/frontend/js/rail/translation-rail-entry.tsx'
@@ -1279,16 +1320,21 @@ module.exports = {
   enablePandocConversions: process.env.ENABLE_PANDOC_CONVERSIONS === 'true',
 
   oauthProviders: {
-    ...(process.env.EXTERNAL_AUTH && process.env.EXTERNAL_AUTH.includes('oidc') && {
-      [process.env.OVERLEAF_OIDC_PROVIDER_ID || 'oidc']: {
-        name: process.env.OVERLEAF_OIDC_PROVIDER_NAME || 'OIDC Provider',
-        descriptionKey: process.env.OVERLEAF_OIDC_PROVIDER_DESCRIPTION,
-        descriptionOptions: { link: process.env.OVERLEAF_OIDC_PROVIDER_INFO_LINK },
-        hideWhenNotLinked: process.env.OVERLEAF_OIDC_PROVIDER_HIDE_NOT_LINKED ?
-          process.env.OVERLEAF_OIDC_PROVIDER_HIDE_NOT_LINKED.toLowerCase() === 'true' : undefined,
-        linkPath: '/oidc/login',
-      },
-    }),
+    ...(process.env.EXTERNAL_AUTH &&
+      process.env.EXTERNAL_AUTH.includes('oidc') && {
+        [process.env.OVERLEAF_OIDC_PROVIDER_ID || 'oidc']: {
+          name: process.env.OVERLEAF_OIDC_PROVIDER_NAME || 'OIDC Provider',
+          descriptionKey: process.env.OVERLEAF_OIDC_PROVIDER_DESCRIPTION,
+          descriptionOptions: {
+            link: process.env.OVERLEAF_OIDC_PROVIDER_INFO_LINK,
+          },
+          hideWhenNotLinked: process.env.OVERLEAF_OIDC_PROVIDER_HIDE_NOT_LINKED
+            ? process.env.OVERLEAF_OIDC_PROVIDER_HIDE_NOT_LINKED.toLowerCase() ===
+              'true'
+            : undefined,
+          linkPath: '/oidc/login',
+        },
+      }),
   },
 
   splitTestOverrides: {
@@ -1296,20 +1342,23 @@ module.exports = {
     'overleaf-code': 'enabled',
     'editor-tabs': 'enabled',
     'writefull-toolbar-migration': 'enabled',
-    ...(process.env.ENABLE_PANDOC_CONVERSIONS === 'true' ? {
-      'import-docx': 'enabled',
-      'import-markdown': 'enabled',
-      'export-docx': 'enabled',
-      'export-html': 'enabled',
-      'export-markdown': 'enabled',
-    } : {}),
-    ...(process.env.OVERLEAF_HISTORY_RESTORE?.toLowerCase() === 'true' ? {
-      'history-ranges-support': 'enabled',
-      'revert-file': 'enabled',
-      'revert-project': 'enabled',
-    } : {}),
+    ...(process.env.ENABLE_PANDOC_CONVERSIONS === 'true'
+      ? {
+          'import-docx': 'enabled',
+          'import-markdown': 'enabled',
+          'export-docx': 'enabled',
+          'export-html': 'enabled',
+          'export-markdown': 'enabled',
+        }
+      : {}),
+    ...(process.env.OVERLEAF_HISTORY_RESTORE?.toLowerCase() === 'true'
+      ? {
+          'history-ranges-support': 'enabled',
+          'revert-file': 'enabled',
+          'revert-project': 'enabled',
+        }
+      : {}),
   },
-
 }
 
 module.exports.mergeWith = function (overrides) {

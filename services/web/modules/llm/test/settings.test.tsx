@@ -55,12 +55,14 @@ it('keeps a stored admin key out of the page and saves an empty key to retain it
 })
 it('allows context settings without enabling personal provider registration', async () => {
   render(<UserSettings />)
-  await screen.findByText('チャットのモデル・参照設定')
+  await screen.findByText('AI 機能ごとのモデル選択')
   expect(screen.queryByRole('button', { name: 'Add provider' })).toBeNull()
   expect(
     api.getJSON.mock.calls.some(([path]) => path === '/user/llm-providers')
   ).toBe(false)
-  fireEvent.click(screen.getByRole('button', { name: 'チャット設定を保存' }))
+  fireEvent.click(
+    screen.getByRole('button', { name: '機能別の AI 選択を保存' })
+  )
   await waitFor(() => expect(api.postJSON).toHaveBeenCalled())
   expect(api.postJSON.mock.calls[0][1].body.chatContextMode).toBe('off')
   expect(api.postJSON.mock.calls[0][1].body.chatContextBudget).toBe(3000)

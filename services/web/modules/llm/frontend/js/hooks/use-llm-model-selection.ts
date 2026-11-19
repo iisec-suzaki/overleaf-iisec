@@ -148,8 +148,10 @@ export function useLLMModelSelection() {
         window.dispatchEvent(
           new CustomEvent(LLM_MODEL_CHANGED_EVENT, { detail: { value } })
         )
+        return true
       } catch {
         setSaveError('モデルを保存できませんでした。もう一度選択してください。')
+        return false
       } finally {
         setSaving(false)
       }

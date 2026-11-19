@@ -146,6 +146,26 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
         reopened = TranslationDatabase(str(self.database.path))
         self.assertEqual(reopened.get_default_endpoint_credentials()[0], "http://a.example/v1")
 
+    async def test_personal_translation_override_does_not_inherit_shared_credentials(self):
+        request = main.TranslationRequest(text="本文", llm_base_url="http://personal.example/v1", llm_minimal_prompt=True, llm_chunk_chars=1200)
+        base_url, headers, extra, minimal, chunk_chars = main._effective_llm_settings(override=request)
+        self.assertEqual(base_url, "http://personal.example/v1")
+        self.assertNotIn("Authorization", headers)
+        self.assertEqual(extra, {})
+        self.assertTrue(minimal)
+        self.assertEqual(chunk_chars, 1200)
+
+    async def test_personal_override_uses_only_its_own_key(self):
+        request = main.TranslationRequest(text="本文", llm_base_url="http://personal.example/v1", llm_api_key="personal-key")
+        self.assertEqual(main._effective_llm_settings(override=request)[1]["Authorization"], "Bearer personal-key")
+
+    async def test_personal_override_url_is_validated(self):
+        with self.assertRaises(HTTPException):
+            main._effective_llm_settings(override=main.TranslationRequest(text="本文", llm_base_url="file:///secret"))
+        response = await self.client.post(f"/projects/{PROJECT_ID}/translate", json={"text": "本文", "model": "model", "llm_base_url": "file:///secret"})
+        self.assertEqual(response.status_code, 400)
+
+
 
 class DatabaseMigrationTests(unittest.TestCase):
     def test_old_endpoint_schema_is_extended_without_losing_saved_data(self):
