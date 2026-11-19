@@ -38,3 +38,11 @@ AI Assistant の「文書レビュー」では、LLM Settings に保存した基
 node --test modules/llm/app/test/*.test.mjs
 yarn test:llm-ui
 ```
+
+このモジュールの `.mjs` は `LLM_ENABLED=true` のときだけ web サーバーが
+読み込むため、vitest（前端中心）だけではコントローラの構文事故が黙って
+通ります（PR#15のスプライス事故がこれで隠れました）。本番で有効化する、
+またはこのモジュールをデプロイする前は、上の `node --test`（全ソースの
+構文検証 `llm-syntax-smoke.test.mjs` を同梱）を緑にしたうえで、
+`LLM_ENABLED=true` を設定した起動 smoke を1回確認してください
+（起動ログに `[LLM] All routes registered` が出れば配線ごと解析済み）。
