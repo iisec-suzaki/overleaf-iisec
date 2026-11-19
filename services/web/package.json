@@ -82,7 +82,6 @@
     "last 1 year",
     "safari >= 15"
   ],
-
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.72",
     "@ai-sdk/google-vertex": "^4.0.113",
