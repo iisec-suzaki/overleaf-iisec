@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => ({
   put: vi.fn(),
   main: 'jp',
   write: true,
+  tabs: [{ id: 'jp' }, { id: 'en' }] as { id: string }[],
+  closeMain: vi.fn(),
+  openMain: vi.fn(),
 }))
 const tree = {
   _id: 'root',
@@ -85,10 +88,34 @@ vi.mock('@/infrastructure/fetch-json', () => ({
   putJSON: mocks.put,
 }))
 
+vi.mock('@/features/ide-react/context/tabs-context', () => ({
+  TAB_TRANSFER_TYPE: 'text/x.tab-id',
+  useTabsContext: () => ({
+    tabs: mocks.tabs,
+    closeTab: mocks.closeMain,
+    openTab: mocks.openMain,
+  }),
+}))
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string, fallback?: string) => fallback || key,
+  }),
+}))
+vi.mock('@/features/source-editor/extensions/visual/visual', () => ({
+  isVisual: () => false,
+}))
+vi.mock('@/infrastructure/event-tracking', () => ({ sendMB: () => {} }))
+vi.mock('@/shared/components/material-icon', () => ({ default: () => null }))
+vi.mock('@/shared/components/ol/ol-tooltip', () => ({
+  default: ({ children }: any) => children,
+}))
 beforeEach(() => {
   localStorage.clear()
   mocks.main = 'jp'
   mocks.write = true
+  mocks.tabs = [{ id: 'jp' }, { id: 'en' }]
+  mocks.openMain.mockResolvedValue(undefined)
+  mocks.closeMain.mockResolvedValue(undefined)
   mocks.get.mockResolvedValue({ content: 'English before', version: 5 })
   mocks.put.mockResolvedValue({ version: 6 })
   vi.spyOn(window, 'confirm').mockReturnValue(true)
@@ -137,7 +164,13 @@ it('chooses the English companion and saves against the version from the read', 
   open()
   const view = await editor()
   replace(view, 'English edited')
-  expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('en')
+  expect(
+    (
+      screen.getByRole('combobox', {
+        name: '横並びで開く .tex',
+      }) as HTMLSelectElement
+    ).value
+  ).toBe('en')
   fireEvent.click(saveButton())
   await waitFor(() =>
     expect(mocks.put).toHaveBeenCalledWith(
@@ -240,9 +273,12 @@ it('keeps separate document content and undo history while switching tabs', asyn
   open()
   const english = await editor()
   replace(english, 'English draft')
-  fireEvent.change(screen.getByRole('combobox'), {
-    target: { value: 'chapter' },
-  })
+  fireEvent.change(
+    screen.getByRole('combobox', { name: '横並びで開く .tex' }),
+    {
+      target: { value: 'chapter' },
+    }
+  )
   const chapter = await editor()
   replace(chapter, 'Chapter draft')
   fireEvent.click(screen.getByRole('tab', { name: 'main.en.tex' }))
@@ -261,9 +297,12 @@ it('confirms discarding a tab but allows switching without discarding', async ()
   open()
   const english = await editor()
   replace(english, 'Unsaved English')
-  fireEvent.change(screen.getByRole('combobox'), {
-    target: { value: 'chapter' },
-  })
+  fireEvent.change(
+    screen.getByRole('combobox', { name: '横並びで開く .tex' }),
+    {
+      target: { value: 'chapter' },
+    }
+  )
   await editor()
   expect(window.confirm).not.toHaveBeenCalled()
   vi.mocked(window.confirm).mockReturnValue(false)
@@ -281,9 +320,12 @@ it('confirms discarding a tab but allows switching without discarding', async ()
 it('restores tab IDs and active tab without storing unsaved document text', async () => {
   const result = open()
   replace(await editor(), 'Private unsaved text')
-  fireEvent.change(screen.getByRole('combobox'), {
-    target: { value: 'chapter' },
-  })
+  fireEvent.change(
+    screen.getByRole('combobox', { name: '横並びで開く .tex' }),
+    {
+      target: { value: 'chapter' },
+    }
+  )
   await editor()
   const stored = localStorage.getItem('bilingual-editor-tabs:project')!
   expect(stored).not.toContain('Private unsaved text')
@@ -356,9 +398,12 @@ it('autosaves after typing and stops automatic retries after a conflict', async 
 it('keeps autosave versions separate for each tab', async () => {
   open()
   const english = await editor()
-  fireEvent.change(screen.getByRole('combobox'), {
-    target: { value: 'chapter' },
-  })
+  fireEvent.change(
+    screen.getByRole('combobox', { name: '横並びで開く .tex' }),
+    {
+      target: { value: 'chapter' },
+    }
+  )
   const chapter = await editor()
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   replace(english, 'English autosave')
@@ -380,12 +425,115 @@ it('opens a selected document from the rail launcher', () => {
   window.addEventListener('overleaf:open-bilingual-editor', listener)
   try {
     render(<SplitLauncherPanel />)
-    fireEvent.change(screen.getByRole('combobox'), {
-      target: { value: 'chapter' },
-    })
+    fireEvent.change(
+      screen.getByRole('combobox', { name: '横並びに追加する文書' }),
+      {
+        target: { value: 'chapter' },
+      }
+    )
     fireEvent.click(screen.getByRole('button', { name: '横並びで開く' }))
     expect(listener.mock.calls[0][0].detail).toEqual({ docId: 'chapter' })
   } finally {
     window.removeEventListener('overleaf:open-bilingual-editor', listener)
   }
+})
+
+it('formats the right-hand document with official commands and retains undo', async () => {
+  open()
+  const view = await editor()
+  act(() => view.dispatch({ selection: { anchor: 0, head: 7 } }))
+  fireEvent.click(screen.getByRole('button', { name: 'toolbar_bold' }))
+  expect(view.state.doc.toString()).toBe('\\textbf{English} before')
+  fireEvent.click(screen.getByRole('button', { name: 'toolbar_undo' }))
+  expect(view.state.doc.toString()).toBe('English before')
+  expect(mocks.put).not.toHaveBeenCalled()
+})
+it('formatting respects read-only permissions', async () => {
+  mocks.write = false
+  open()
+  const view = await editor()
+  fireEvent.click(screen.getByRole('button', { name: 'toolbar_bold' }))
+  expect(view.state.doc.toString()).toBe('English before')
+  expect(mocks.put).not.toHaveBeenCalled()
+})
+it('moves a saved side tab back to the main editor', async () => {
+  open()
+  await editor()
+  fireEvent.click(
+    screen.getByRole('button', { name: 'main.en.tex を左のエディターへ移す' })
+  )
+  await waitFor(() => expect(mocks.openMain).toHaveBeenCalledWith('en'))
+  await waitFor(() =>
+    expect(screen.queryByRole('tab', { name: 'main.en.tex' })).toBeNull()
+  )
+})
+it('retains unsaved edits when a move to the main editor is requested', async () => {
+  open()
+  const view = await editor()
+  replace(view, 'unsaved text')
+  fireEvent.click(
+    screen.getByRole('button', { name: 'main.en.tex を左のエディターへ移す' })
+  )
+  expect(mocks.openMain).not.toHaveBeenCalled()
+  expect(view.state.doc.toString()).toBe('unsaved text')
+  expect(
+    screen.getByText(
+      '未保存の変更を保存してから、左のエディターへ移してください。'
+    )
+  ).toBeTruthy()
+})
+it('retains a saved side tab if opening the main editor fails', async () => {
+  mocks.openMain.mockRejectedValue(new Error('offline'))
+  open()
+  await editor()
+  fireEvent.click(
+    screen.getByRole('button', { name: 'main.en.tex を左のエディターへ移す' })
+  )
+  await screen.findByText(
+    '左のエディターで開けませんでした。横並び側のタブは保持しています。'
+  )
+  expect(screen.getByRole('tab', { name: 'main.en.tex' })).toBeTruthy()
+})
+it('accepts a main .tex tab drop and closes it on the main side', async () => {
+  open()
+  await editor()
+  const target = screen.getByRole('tablist', {
+    name: '横並びの文書',
+  }).parentElement!
+  fireEvent.drop(target, {
+    dataTransfer: { types: ['text/x.tab-id'], getData: () => 'jp' },
+  })
+  await waitFor(() => expect(mocks.closeMain).toHaveBeenCalledWith('jp'))
+  expect(screen.getByRole('tab', { name: 'main.tex' })).toBeTruthy()
+})
+it('keeps the last main tab and ignores unknown document drops', async () => {
+  mocks.tabs = [{ id: 'jp' }]
+  open()
+  await editor()
+  const target = screen.getByRole('tablist', {
+    name: '横並びの文書',
+  }).parentElement!
+  fireEvent.drop(target, {
+    dataTransfer: { types: ['text/x.tab-id'], getData: () => 'foreign' },
+  })
+  expect(screen.getAllByRole('tab')).toHaveLength(1)
+  fireEvent.drop(target, {
+    dataTransfer: { types: ['text/x.tab-id'], getData: () => 'jp' },
+  })
+  await screen.findByRole('tab', { name: 'main.tex' })
+  expect(mocks.closeMain).not.toHaveBeenCalled()
+})
+
+it('retains a tab opened while another tab is moving to the main editor', async () => {
+  let finish!: () => void
+  mocks.openMain.mockImplementation(()=>new Promise<void>(resolve=>{finish=resolve}))
+  open()
+  await editor()
+  fireEvent.click(screen.getByRole('button',{name:'main.en.tex を左のエディターへ移す'}))
+  await waitFor(()=>expect(mocks.openMain).toHaveBeenCalled())
+  fireEvent.change(screen.getByRole('combobox',{name:'横並びで開く .tex'}),{target:{value:'chapter'}})
+  await screen.findByRole('tab',{name:'chapters/INTRO.TEX'})
+  await act(async()=>{finish()})
+  expect(screen.getByRole('tab',{name:'chapters/INTRO.TEX'})).toBeTruthy()
+  expect(screen.queryByRole('tab',{name:'main.en.tex'})).toBeNull()
 })

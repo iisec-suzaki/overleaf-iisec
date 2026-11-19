@@ -1,0 +1,8 @@
+# loopbackへの公開を保ち、指定したLAN・Tailscaleアドレスへ追加公開します。
+# .envに実際のホストのIPv4を設定してから使います。
+# docker compose -f compose.yaml -f compose.lan.yaml up -d
+services:
+  sharelatex:
+    ports:
+      - "${OVERLEAF_LAN_IP:?Set OVERLEAF_LAN_IP in .env}:${OVERLEAF_PORT:-8080}:80"
+      - "${OVERLEAF_TAILSCALE_IP:?Set OVERLEAF_TAILSCALE_IP in .env}:${OVERLEAF_PORT:-8080}:80"
