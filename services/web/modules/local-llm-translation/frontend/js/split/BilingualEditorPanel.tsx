@@ -35,6 +35,15 @@ import { useActiveEditorTheme } from '@/shared/hooks/use-active-editor-theme'
 import { HorizontalResizeHandle } from '@/features/ide-react/components/resize/horizontal-resize-handle'
 import { getJSON, putJSON } from '@/infrastructure/fetch-json'
 import { collectTexDocs } from './tex-docs'
+import {
+  TAB_TRANSFER_TYPE,
+  useTabsContext,
+} from '@/features/ide-react/context/tabs-context'
+import {
+  CodeMirrorStateContext,
+  CodeMirrorViewContext,
+} from '@/features/source-editor/components/codemirror-context'
+import BilingualEditorToolbar from './BilingualEditorToolbar'
 
 type Session = { id: string; view: EditorView; version: number; saved: string }
 const errorMessage = (error: unknown) =>
@@ -49,9 +58,11 @@ function DocumentEditor({
   active,
   refreshToken,
   onStatusChange,
+  moving,
 }: {
   docId: string
   active: boolean
+  moving: boolean
   refreshToken: number
   onStatusChange: (id: string, status: TabStatus) => void
 }) {
@@ -68,6 +79,7 @@ function DocumentEditor({
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [editorState, setEditorState] = useState<EditorState | null>(null)
   const host = useRef<HTMLDivElement>(null)
   const session = useRef<Session | null>(null)
   const savingRef = useRef(false)
@@ -78,7 +90,7 @@ function DocumentEditor({
   const options = useMemo(() => collectTexDocs(fileTreeData), [fileTreeData])
   const selected = options.find(doc => doc.id === docId)
   const canEdit = Boolean(
-    permissions.write && selected && currentDocumentId !== docId
+    permissions.write && selected && currentDocumentId !== docId && !moving
   )
   const canEditRef = useRef(canEdit)
   canEditRef.current = canEdit
@@ -118,6 +130,7 @@ function DocumentEditor({
     if (!docId || !host.current) return
     const controller = new AbortController()
     setLoading(true)
+    setEditorState(null)
     setDirty(false)
     setError('')
     setNotice('')
@@ -182,6 +195,8 @@ function DocumentEditor({
                 'aria-label': '横並びエディター',
               }),
               EditorView.updateListener.of(update => {
+                // 選択範囲・権限・Undo状態の変化も、公式ツールバーへ反映します。
+                setEditorState(update.state)
                 if (
                   update.docChanged &&
                   session.current?.view === update.view
@@ -206,6 +221,7 @@ function DocumentEditor({
           version: doc.version,
           saved: doc.content,
         }
+        setEditorState(view.state)
         const spec = await setEditorTheme(data.editorTheme)
         if (!controller.signal.aborted) view.dispatch(spec)
       })
@@ -375,6 +391,13 @@ function DocumentEditor({
           {error}
         </div>
       )}
+      {active && editorState && session.current && (
+        <CodeMirrorStateContext.Provider value={editorState}>
+          <CodeMirrorViewContext.Provider value={session.current.view}>
+            <BilingualEditorToolbar docId={docId} />
+          </CodeMirrorViewContext.Provider>
+        </CodeMirrorStateContext.Provider>
+      )}
       <div ref={host} style={{ flex: 1, minHeight: 0, overflow: 'auto' }} />
     </div>
   )
@@ -408,6 +431,12 @@ export default function BilingualEditorPanel({ order }: { order?: number }) {
 }
 
 function ProjectBilingualEditor({ order }: { order?: number }) {
+  const {
+    tabs: mainTabs,
+    closeTab: closeMainTab,
+    openTab: openMainTab,
+  } = useTabsContext()
+  const [moving, setMoving] = useState('')
   const { projectId } = useProjectContext()
   const { fileTreeData } = useFileTreeData()
   const { currentDocumentId } = useEditorOpenDocContext()
@@ -416,6 +445,9 @@ function ProjectBilingualEditor({ order }: { order?: number }) {
   const [initial] = useState(() => restoreTabs(storageKey))
   const [ids, setIds] = useState(initial.ids)
   const [active, setActive] = useState(initial.active)
+  useEffect(() => {
+    if (!ids.includes(active)) setActive(ids[0] || '')
+  }, [ids, active])
   const [statuses, setStatuses] = useState<Record<string, TabStatus>>({})
   const [refresh, setRefresh] = useState<Record<string, number>>({})
   const [notice, setNotice] = useState('')
@@ -440,7 +472,11 @@ function ProjectBilingualEditor({ order }: { order?: number }) {
   useEffect(() => {
     const onOpen = (event: Event) => {
       const detail = (
-        event as CustomEvent<{ docId?: string; refresh?: boolean }>
+        event as CustomEvent<{
+          docId?: string
+          refresh?: boolean
+          move?: boolean
+        }>
       ).detail
       const current = options.find(doc => doc.id === currentDocumentId)
       const companion = current?.path.toLowerCase().endsWith('.en.tex')
@@ -459,6 +495,19 @@ function ProjectBilingualEditor({ order }: { order?: number }) {
             ? active
             : fallback
       if (!target) return
+      // 移動要求は同じプロジェクトの既知の.texタブに限定します。
+      if (detail?.move && !options.some(doc => doc.id === target)) return
+      if (
+        detail?.move &&
+        mainTabs.some(tab => tab.id === target) &&
+        mainTabs.length > 1
+      ) {
+        Promise.resolve(closeMainTab(target)).catch(() =>
+          setNotice(
+            'メイン側のタブを閉じられませんでした。横並び側の内容は保持しています。'
+          )
+        )
+      }
       setIds(previous =>
         previous.includes(target) ? previous : [...previous, target]
       )
@@ -481,7 +530,7 @@ function ProjectBilingualEditor({ order }: { order?: number }) {
     window.addEventListener('overleaf:open-bilingual-editor', onOpen)
     return () =>
       window.removeEventListener('overleaf:open-bilingual-editor', onOpen)
-  }, [options, currentDocumentId, ids, active])
+  }, [options, currentDocumentId, ids, active, mainTabs, closeMainTab])
 
   const label = (id: string) => options.find(doc => doc.id === id)?.path || id
   const canClose = (targets: string[]) => {
@@ -502,9 +551,38 @@ function ProjectBilingualEditor({ order }: { order?: number }) {
       delete next[id]
       return next
     })
-    setIds(remaining)
-    if (active === id) setActive(remaining[0] || '')
+    // メインで開く非同期処理中に追加された別タブを、古い配列で消さないようにします。
+    setIds(current => current.filter(item => item !== id))
+    setActive(current => current === id ? remaining[0] || '' : current)
     setNotice('')
+  }
+  const moveLeft = async (id: string) => {
+    if (
+      moving ||
+      statusRef.current[id]?.dirty ||
+      statusRef.current[id]?.saving
+    ) {
+      setNotice('未保存の変更を保存してから、左のエディターへ移してください。')
+      return
+    }
+    setMoving(id)
+    try {
+      // openTabの完了までは右側の編集を止め、成功するまでタブを残します。
+      await openMainTab(id)
+      if (statusRef.current[id]?.dirty || statusRef.current[id]?.saving) {
+        setNotice(
+          '横並び側の変更を保持しました。メインで別の文書を開き、変更を保存してから移動してください。'
+        )
+        return
+      }
+      closeTab(id)
+    } catch {
+      setNotice(
+        '左のエディターで開けませんでした。横並び側のタブは保持しています。'
+      )
+    } finally {
+      setMoving('')
+    }
   }
   if (!ids.length) return null
   return (
@@ -519,6 +597,29 @@ function ProjectBilingualEditor({ order }: { order?: number }) {
         aria-label="日英の横並び編集"
       >
         <div
+          onDragOver={event => {
+            if (
+              Array.from(event.dataTransfer.types).includes(TAB_TRANSFER_TYPE)
+            ) {
+              event.preventDefault()
+              event.dataTransfer.dropEffect = 'move'
+            }
+          }}
+          onDrop={event => {
+            const id = event.dataTransfer.getData(TAB_TRANSFER_TYPE)
+            if (
+              !mainTabs.some(tab => tab.id === id) ||
+              !options.some(doc => doc.id === id)
+            )
+              return
+            event.preventDefault()
+            event.stopPropagation()
+            window.dispatchEvent(
+              new CustomEvent('overleaf:open-bilingual-editor', {
+                detail: { docId: id, move: true },
+              })
+            )
+          }}
           style={{
             height: '100%',
             minHeight: 0,
@@ -604,6 +705,15 @@ function ProjectBilingualEditor({ order }: { order?: number }) {
                 <button
                   type="button"
                   className="btn btn-sm btn-secondary"
+                  aria-label={`${label(id)} を左のエディターへ移す`}
+                  disabled={Boolean(moving) || statuses[id]?.saving}
+                  onClick={() => void moveLeft(id)}
+                >
+                  ←
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-secondary"
                   aria-label={`${label(id)} のタブを閉じる`}
                   disabled={statuses[id]?.saving}
                   onClick={() => closeTab(id)}
@@ -624,6 +734,7 @@ function ProjectBilingualEditor({ order }: { order?: number }) {
                 key={id}
                 docId={id}
                 active={active === id}
+                moving={moving === id}
                 refreshToken={refresh[id] || 0}
                 onStatusChange={onStatusChange}
               />

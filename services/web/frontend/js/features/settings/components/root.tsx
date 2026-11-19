@@ -1,3 +1,4 @@
+import LLMUserSection from './llm-user-section'
 import SecuritySection from '@/features/settings/components/security-section'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -81,6 +82,7 @@ function SettingsPageContent() {
               <LabsProgramSection />
             </>
           ) : null}
+          <LLMUserSection />
           <SessionsSection />
           {isOverleaf ? (
             <>

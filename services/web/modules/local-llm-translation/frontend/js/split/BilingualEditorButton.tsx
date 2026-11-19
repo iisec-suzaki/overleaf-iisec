@@ -1,22 +1,38 @@
-/** 公式の拡張スロットから横並びパネルを開く。メイン文書・タブは切り替えない。 */
+import { useCodeMirrorViewContext } from '@/features/source-editor/components/codemirror-context'
+import { useEditorOpenDocContext } from '@/features/ide-react/context/editor-open-doc-context'
+
+/** メインで開いている.texを右へ移す。最後のメインタブは公式の制約どおり残す。 */
 export default function BilingualEditorButton() {
+  const view = useCodeMirrorViewContext()
+  const { currentDocumentId, currentDocument, openDocName } =
+    useEditorOpenDocContext()
+  const available =
+    currentDocumentId &&
+    currentDocument?.cm6?.view === view &&
+    /\.tex$/i.test(openDocName || '')
   return (
     <button
       type="button"
       className="ol-cm-toolbar-button"
+      disabled={!available}
       style={{
         width: 'auto',
         minWidth: 'max-content',
         padding: '0 4px',
         whiteSpace: 'nowrap',
       }}
-      aria-label="日英の横並び編集"
-      title="日英の横並び編集"
-      onClick={() =>
-        window.dispatchEvent(new Event('overleaf:open-bilingual-editor'))
-      }
+      aria-label="現在のファイルを右の横並びパネルへ移す"
+      title="現在のファイルを右の横並びパネルへ移す"
+      onClick={() => {
+        if (available)
+          window.dispatchEvent(
+            new CustomEvent('overleaf:open-bilingual-editor', {
+              detail: { docId: currentDocumentId, move: true },
+            })
+          )
+      }}
     >
-      横並び
+      右へ移す
     </button>
   )
 }
