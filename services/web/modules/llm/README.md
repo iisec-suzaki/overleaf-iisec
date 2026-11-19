@@ -32,10 +32,14 @@ AI Assistant の「文書レビュー」では、LLM Settings に保存した基
 個人接続が未選択なら、翻訳サービスの既存の共有接続設定を使います。
 選択した個人接続が削除・無効化された場合は、別の送信先へ切り替えずに翻訳を止めます。
 
-基本テスト（開発依存導入済みの `services/web` 内で実行）:
+基本テスト（開発依存導入済みの `services/web` 内で実行）。
+Yarn PnP のため `node --test` は PnP フック付きで実行します（web コンテナは
+`NODE_OPTIONS` に同様の設定済みなので、コンテナ内なら `docker exec` のまま動きます）:
 
 ```sh
-node --test modules/llm/app/test/*.test.mjs
+R="$(git rev-parse --show-toplevel)"
+NODE_OPTIONS="-r $R/.pnp.cjs --import $R/.pnp.register.mjs" \
+  node --test modules/llm/app/test/*.test.mjs
 yarn test:llm-ui
 ```
 
