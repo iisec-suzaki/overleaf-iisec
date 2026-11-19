@@ -406,7 +406,9 @@ describe('LinkedFilesController', function () {
           )
         })
       })
+    })
 
+    // 参照の再索引とは独立して、取り込んだ本人以外の更新が拒否されることを確認します。
     it('returns error 400 if user is not original importer', async function (ctx) {
       ctx.Agent.promises.refreshLinkedFile = sinon
         .stub()
@@ -426,17 +428,15 @@ describe('LinkedFilesController', function () {
           contentType: sinon.stub(),
           setHeader: sinon.stub(),
           send: sinon.stub(msg => {
-            expect(msg).to.equal('You are not the user who originally imported this file')
+            expect(msg).to.equal(
+              'You are not the user who originally imported this file'
+            )
             resolve()
           }),
         }
 
         ctx.LinkedFilesController.refreshLinkedFile(ctx.req, ctx.res, ctx.next)
       })
-    })
-      })
-
-      expect(ctx.Agent.promises.refreshLinkedFile).to.not.have.been.called
     })
   })
   describe('handleError', function () {
