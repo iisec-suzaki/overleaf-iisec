@@ -288,6 +288,13 @@ async function addProvider(req, res) {
         }))
       : []
   const merged = [...migrated, ...existing, row]
+  await User.updateOne({ _id: userId }, { $set: { llmProviders: merged } })
+  logger.info({ userId, rowId: row.id }, '[LLM] addProvider: row added')
+  res.json({ ok: true, provider: publicRow(row) })
+}
+
+async function updateProvider(req, res) {
+  if (!(await requireUserSettingsAllowed(req, res))) return
   // サイト共通接続だけの利用者にも参照設定・使用量を表示します。
   // 個人の接続先を変更するAPIは、それぞれBYO許可を検証します。
   const userId = SessionManager.getLoggedInUserId(req.session)
