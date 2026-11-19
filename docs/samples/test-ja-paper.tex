@@ -1,0 +1,46 @@
+% 翻訳機能の検証用サンプル（小さめ・約1,200字 → 翻訳は数分で終わります）。
+% Overleaf で新規プロジェクトを作り、このファイルを main.tex としてアップロードして
+% 「現在のファイル全体」を翻訳すると、再試行・原文保持・保存の流れを確認できます。
+\documentclass[twocolumn,ja=standard]{bxjsarticle}
+\usepackage{amsmath}
+\usepackage{hyperref}
+
+\title{ローカルLLM翻訳の検証用サンプル}
+\author{テスト タロウ}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+本サンプルは、日本語から英語への機械翻訳機能を短い時間で検証するための文書です。
+参照・引用・数式・コードが正しく保持されるかを確認できます。
+\end{abstract}
+
+\section{はじめに}
+本研究では、CI/CDパイプラインにおける信頼境界について検討する。
+先行研究\cite{ghsl2026}でも指摘されている問題である。
+図\ref{fig:arch}にシステム構成の概念を示す。
+
+\section{手法}
+評価対象の主要な指標は次式で定義する。
+\begin{equation}
+  R = \frac{T_{\mathrm{auto}}}{T_{\mathrm{auto}} + T_{\mathrm{manual}}}
+  \label{eq:ratio}
+\end{equation}
+ここで、$T_{\mathrm{auto}}$ は自動化された検証時間、$T_{\mathrm{manual}}$ は
+人手による確認時間である。測定は以下の手順で行った。
+\begin{itemize}
+  \item 各パイプラインの実行ログを収集する。
+  \item 図\ref{fig:arch}の構成に従って回帰テストを適用する。
+  \item 結果表を\verb|results.csv|へ出力する。 % コメントは翻訳されない
+\end{itemize}
+
+\section{おわりに}
+本手法により、検証時間を平均で38\%短縮できた。
+詳細な手順は公式ドキュメント\footnote{\url{https://docs.github.com/actions}}を参照されたい。
+
+\begin{thebibliography}{9}
+\bibitem{ghsl2026} GitHub Security Lab, ``Artifact metadata injection,'' 2026.
+\end{thebibliography}
+
+\end{document}
