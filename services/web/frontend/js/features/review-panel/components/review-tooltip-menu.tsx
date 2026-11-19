@@ -37,6 +37,7 @@ import useEventListener from '@/shared/hooks/use-event-listener'
 import useReviewPanelLayout from '../hooks/use-review-panel-layout'
 import { usePermissionsContext } from '@/features/ide-react/context/permissions-context'
 import { sendMB } from '@/infrastructure/event-tracking'
+import getMeta from '@/utils/meta'
 
 const EDIT_MODE_SWITCH_WIDGET_HEIGHT = 40
 const CM_LINE_RIGHT_PADDING = 8
@@ -125,13 +126,13 @@ const ReviewTooltipMenu: FC = () => {
   }
 
   return ReactDOM.createPortal(
-    <ReviewTooltipMenuContent onAddComment={addComment} />,
+    <ReviewTooltipMenuContent onAddComment={addComment} onHide={() => setShow(false)} />,
     tooltipView.dom
   )
 }
 
-const ReviewTooltipMenuContent = memo<{ onAddComment: () => void }>(
-  function ReviewTooltipMenuContent({ onAddComment }) {
+const ReviewTooltipMenuContent = memo<{ onAddComment: () => void; onHide: () => void }>(
+  function ReviewTooltipMenuContent({ onAddComment, onHide }) {
     const { t } = useTranslation()
     const view = useCodeMirrorViewContext()
     const state = useCodeMirrorStateContext()
@@ -269,6 +270,19 @@ const ReviewTooltipMenuContent = memo<{ onAddComment: () => void }>(
           <MaterialIcon type="chat" />
           {t('add_comment')}
         </button>
+        {getMeta('ol-ExposedSettings').llmEnabled && (window as any).__llmChatEnabled !== false && (
+          <>
+            <div className="review-tooltip-menu-divider" />
+            <button type="button" className="review-tooltip-menu-button" onClick={() => {
+              // 選択を失う前の範囲を、対象ビューと一緒に渡します。
+              const range = state.selection.main
+              document.dispatchEvent(new CustomEvent('llm-ask-ai-selection', { detail: {
+                view, text: state.sliceDoc(range.from, range.to), range: {from:range.from,to:range.to},
+              }}))
+              onHide()
+            }}><MaterialIcon type="smart_toy" />{t('ask_ai', 'Ask AI')}</button>
+          </>
+        )}
         {showChangesButtons && (
           <>
             <div className="review-tooltip-menu-divider" />

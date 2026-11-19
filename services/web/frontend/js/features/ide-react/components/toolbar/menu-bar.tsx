@@ -103,6 +103,7 @@ export const ToolbarMenuBar = () => {
       },
       { id: 'file-tools', children: ['show_version_history', 'word_count'] },
       { id: 'submit', children: ['submit-project', 'manage-template'] },
+      { id: 'file-llm-model', children: ['llm_select_model'] },
       {
         id: 'file-download',
         children: [

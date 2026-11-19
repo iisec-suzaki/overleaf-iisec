@@ -516,6 +516,7 @@ export default function LLMSettingsSection({
         </OLButton>
       )}
 
+      <TranslationLane providers={providers} loading={loading} />
       <FeatureModelsLane providers={providers} loading={loading} />
 
       {/* Add / edit panel */}
@@ -876,7 +877,7 @@ function FeatureModelsLane({
       })
       setNotice({
         type: 'success',
-        text: 'チャット設定を保存しました。次のリクエストから反映されます。',
+        text: '機能別の AI 選択を保存しました。次のリクエストから反映されます。',
       })
     } catch (err: any) {
       setNotice({
@@ -894,7 +895,7 @@ function FeatureModelsLane({
 
   return (
     <div className="llm-buo-editor" style={{ marginTop: 16 }}>
-      <h2 className="llm-buo-editor-title">チャットのモデル・参照設定</h2>
+      <h2 className="llm-buo-editor-title">AI 機能ごとのモデル選択</h2>
       <OLFormText variant="text">
         チャットに使うモデルと、プロジェクトの参照範囲を設定します。
         「共有選択に従う」ではレールのモデル選択を使います。
@@ -976,7 +977,7 @@ function FeatureModelsLane({
         </OLFormText>
       </OLFormGroup>
 
-      {FEATURE_DEFS.filter(feature => feature.key === 'chat').map(feature => (
+      {FEATURE_DEFS.map(feature => (
         <OLFormGroup key={feature.key}>
           <OLFormLabel htmlFor={`llm-feature-${feature.key}`}>
             {feature.label}
@@ -1034,7 +1035,221 @@ function FeatureModelsLane({
       {notice && <OLNotification type={notice.type} content={notice.text} />}
 
       <OLButton variant="primary" disabled={busy} onClick={save}>
-        {busy ? '保存中…' : 'チャット設定を保存'}
+        {busy ? '保存中…' : '機能別の AI 選択を保存'}
+      </OLButton>
+    </div>
+  )
+}
+
+// ---- 翻訳専用欄（英語翻訳レールの接続先選択・Phase 2） -----------------------
+//
+// 「英語翻訳」レールがどの BYO 行で翻訳するかを選ぶ欄です。保存先は
+// User.llmTranslation（GET/POST /user/llm-translation-settings）。翻訳依頼の
+// ときにサーバー側がこの設定を翻訳サービスへの接続オーバーライドとして渡します。
+// 「標準設定に従う」を選んだ場合、翻訳サービス側の従来チェーン
+// （保存済みエンドポイント > .env）が使われ続けました。
+// Anthropic 行は翻訳サービスが OpenAI 互換 API しか話せないため候補から除外します。
+
+type TranslationDraft = {
+  providerId: string
+  model: string
+  minimal: boolean
+  chunkChars: string
+}
+
+function TranslationLane({
+  providers,
+  loading,
+}: {
+  providers: ProviderRow[]
+  loading: boolean
+}) {
+  const [draft, setDraft] = useState<TranslationDraft | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<Notice>(null)
+
+  // 翻訳に使える行（有効な OpenAI / OpenAI 互換行だけ）。
+  const eligible = providers.filter(
+    row => row.enabled && row.providerType !== 'anthropic'
+  )
+
+  // 保存済みの翻訳設定をマウント時に読み込みます（未保存なら標準跟随表示）。
+  useEffect(() => {
+    let active = true
+    const loadSettings = async () => {
+      try {
+        const response = await getJSON('/user/llm-translation-settings')
+        if (!active || !response.ok) return
+        const settings = response.settings || {}
+        setDraft({
+          providerId: settings.providerId || '',
+          model: settings.model || '',
+          minimal: !!settings.minimal,
+          chunkChars: settings.chunkChars ? String(settings.chunkChars) : '',
+        })
+      } catch {
+        // 読み取り失敗は翻訳機能自体の障害ではないため、欄は空欄のまま進めます。
+      }
+    }
+    loadSettings()
+    return () => {
+      active = false
+    }
+  }, [])
+
+  if (loading || !draft) return null
+
+  const selected = eligible.find(row => row.id === draft.providerId)
+  // 保存後にその行を削除/無効化していた場合の表示用（保存時はサーバーが 400）。
+  const staleRow = !!draft.providerId && !selected
+
+  const setField = <K extends keyof TranslationDraft>(
+    key: K,
+    value: TranslationDraft[K]
+  ) => {
+    setDraft(current => (current ? { ...current, [key]: value } : current))
+    setNotice(null)
+  }
+
+  const save = async () => {
+    setBusy(true)
+    setNotice(null)
+    try {
+      // 標準跟随のときはモデル・ミニマル・チャンクの各欄も空欄扱いで送ります
+      // （サーバー側でも無効化されますが、UI の状態と送信値を一致させます）。
+      const chunk = parseInt(draft.chunkChars, 10)
+      await postJSON('/user/llm-translation-settings', {
+        body: {
+          providerId: draft.providerId,
+          model: draft.providerId ? draft.model : '',
+          minimal: draft.providerId ? draft.minimal : false,
+          chunkChars: draft.providerId && Number.isFinite(chunk) ? chunk : 0,
+        },
+      })
+      setNotice({
+        type: 'success',
+        text: '翻訳設定を保存しました。翻訳レールにすぐに反映されます。',
+      })
+    } catch (err: any) {
+      setNotice({
+        type: 'error',
+        text:
+          err?.data?.message ||
+          err?.data?.detail ||
+          err?.message ||
+          '翻訳設定を保存できませんでした。',
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="llm-buo-editor" style={{ marginTop: 16 }}>
+      <h2 className="llm-buo-editor-title">英語翻訳の接続設定</h2>
+      <OLFormText variant="text">
+        左レールの「英語翻訳」パネルが使う接続先をここで選びます。
+        「標準設定に従う」では翻訳サービス側の設定（保存済みエンドポイント →
+        .env）が使われます。
+      </OLFormText>
+
+      <OLFormGroup>
+        <OLFormLabel htmlFor="llm-translation-provider">接続先</OLFormLabel>
+        <select
+          id="llm-translation-provider"
+          className="form-select"
+          value={draft.providerId}
+          onChange={e => {
+            setDraft(current =>
+              current
+                ? {
+                    ...current,
+                    providerId: e.target.value,
+                    model: '',
+                    chunkChars: '',
+                    minimal: false,
+                  }
+                : current
+            )
+            setNotice(null)
+          }}
+        >
+          <option value="">
+            標準設定に従う（翻訳サービスのエンドポイント / .env）
+          </option>
+          {eligible.map(row => (
+            <option key={row.id} value={row.id}>
+              {row.name}（
+              {PROVIDER_TYPE_LABELS[row.providerType] || row.providerType}）
+            </option>
+          ))}
+          {staleRow && (
+            <option value={draft.providerId}>
+              （選択中の行は削除または無効化されています。選び直してください）
+            </option>
+          )}
+        </select>
+      </OLFormGroup>
+
+      {selected && (
+        <>
+          <OLFormGroup>
+            <OLFormLabel htmlFor="llm-translation-model">
+              翻訳に使うモデル（任意）
+            </OLFormLabel>
+            <select
+              id="llm-translation-model"
+              className="form-select"
+              value={draft.model}
+              onChange={e => setField('model', e.target.value)}
+            >
+              <option value="">翻訳レール／翻訳サービスの選択に従う</option>
+              {selected.models.map(model => (
+                <option key={model} value={model}>
+                  {model}
+                </option>
+              ))}
+            </select>
+            <OLFormText variant="text">
+              ここで選ぶと、翻訳レールでモデル未指定のときにこのモデルが使われます。
+            </OLFormText>
+          </OLFormGroup>
+
+          <OLFormGroup>
+            <label>
+              <input
+                type="checkbox"
+                checked={draft.minimal}
+                onChange={e => setField('minimal', e.target.checked)}
+              />{' '}
+              ミニマルプロンプト（翻訳特化モデル用: plamo-3-translate など。
+              命令文や用語集の文章を送らず、直近の対訳履歴だけで翻訳します）
+            </label>
+          </OLFormGroup>
+
+          <OLFormGroup>
+            <OLFormLabel htmlFor="llm-translation-chunk">
+              1チャンクの字数（任意）
+            </OLFormLabel>
+            <input
+              id="llm-translation-chunk"
+              className="form-control"
+              type="number"
+              min={200}
+              max={200000}
+              step={100}
+              value={draft.chunkChars}
+              onChange={e => setField('chunkChars', e.target.value)}
+              placeholder="空欄なら既定の 3600 字。余裕のあるモデルは大きく可（例: 6000）"
+            />
+          </OLFormGroup>
+        </>
+      )}
+
+      {notice && <OLNotification type={notice.type} content={notice.text} />}
+
+      <OLButton variant="primary" disabled={busy} onClick={save}>
+        {busy ? '保存中…' : '翻訳設定を保存'}
       </OLButton>
     </div>
   )

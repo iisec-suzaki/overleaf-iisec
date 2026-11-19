@@ -132,9 +132,49 @@ export default function LLMAdminSettingsPage() {
       .map(m => m.trim())
       .filter(Boolean)
   )
+  // overleaf-lab (2026-08-27, owner request): the admin "Inline completion
+  // model" and "Review model" pickers and the rubric editor are GONE. Inline
+  // completion and the review both run on each user's shared model selection
+  // (profile → BYO row → site default), and rubrics live per-user under
+  // /user/llm-settings.
+  const [maxContextTokens, setMaxContextTokens] = useState<number>(
+    parseInt((getMeta('ol-maxContextTokens') as string) || '32000', 10) || 32000
+  )
+  // overleaf-lab: budget for the review's JSON answer (the model's max_tokens and
+  // the room reserved for it in the context check).
+  const [reviewMaxTokens, setReviewMaxTokens] = useState<number>(
+    parseInt((getMeta('ol-reviewMaxTokens') as string) || '12000', 10) || 12000
+  )
+  // overleaf-lab: per-feature enable/disable toggles. The metas use data-type='json'
+  // so getMeta returns the parsed boolean; default to true when missing/undefined.
   const [chatEnabled, setChatEnabled] = useState<boolean>(
     getMeta('ol-chatEnabled') !== false
   )
+  const [completionEnabled, setCompletionEnabled] = useState<boolean>(
+    getMeta('ol-completionEnabled') !== false
+  )
+  const [reviewEnabled, setReviewEnabled] = useState<boolean>(
+    getMeta('ol-reviewEnabled') !== false
+  )
+  // overleaf-lab: editable AI prompts. Empty field means the backend uses its
+  // built-in default; promptDefaults feeds the per-field reset buttons.
+  const promptDefaults = (getMeta('ol-promptDefaults') as any) || {}
+  const [askAiSystemPrompt, setAskAiSystemPrompt] = useState<string>(
+    (getMeta('ol-askAiSystemPrompt') as string) || ''
+  )
+  const [errorPrompt, setErrorPrompt] = useState<string>(
+    (getMeta('ol-errorPrompt') as string) || ''
+  )
+  const [reviewSystemPrompt, setReviewSystemPrompt] = useState<string>(
+    (getMeta('ol-reviewSystemPrompt') as string) || ''
+  )
+  const initialActions =
+    (getMeta('ol-askAiActionPrompts') as Record<string, string>) || {}
+  const [askAiActionPrompts, setAskAiActionPrompts] = useState<
+    Record<string, string>
+  >(initialActions && typeof initialActions === 'object' ? initialActions : {})
+  // overleaf-lab: keep the Ask AI action templates block collapsed by default
+  const [showActions, setShowActions] = useState(false)
   const [scanStatus, setScanStatus] = useState<string | null>(null)
   const [testStatus, setTestStatus] = useState<string | null>(null)
 
@@ -176,7 +216,19 @@ export default function LLMAdminSettingsPage() {
           clearLlmApiKey,
           allowedModels,
           knownModels,
+          // overleaf-lab (2026-08-27): completionModel / complianceRubrics /
+          // reviewModel no longer sent — see the state block above. Existing
+          // values in the admin settings document simply stop being read by
+          // the lane resolution logic.
+          maxContextTokens,
+          reviewMaxTokens,
           chatEnabled,
+          completionEnabled,
+          reviewEnabled,
+          askAiSystemPrompt,
+          errorPrompt,
+          reviewSystemPrompt,
+          askAiActionPrompts,
         },
       })
     ).catch((err: any) => {
@@ -303,6 +355,11 @@ export default function LLMAdminSettingsPage() {
             icon: 'description',
             label: t('system_prompt', 'System Prompt'),
           },
+          {
+            id: 'prompts',
+            icon: 'edit_note',
+            label: t('ai_prompts', 'AI Prompts'),
+          },
           { id: 'usage', icon: 'insights', label: t('llm_usage', 'Usage') }, // overleaf-lab (usage meter)
         ].map(s => (
           <button
@@ -345,27 +402,41 @@ export default function LLMAdminSettingsPage() {
                 on: chatEnabled,
                 set: setChatEnabled,
                 title: t('feature_chat', 'Chat'),
-                help: t('feature_chat_help', 'The AI chat panel.'),
+                help: t(
+                  'feature_chat_help',
+                  'The AI chat panel and Ask AI on selection.'
+                ),
               },
-            ]
-              .filter(feature => feature.key === 'chat')
-              .map(f => (
-                <div key={f.key} className="ol-llm-admin-settings__feature-row">
-                  <div>
-                    <span className="ol-llm-admin-settings__feature-title">
-                      {f.title}
-                    </span>
-                    <OLFormText className="ol-llm-admin-settings__no-margin">
-                      {f.help}
-                    </OLFormText>
-                  </div>
-                  <ToggleSwitch
-                    checked={f.on}
-                    onChange={f.set}
-                    label={f.title}
-                  />
+              {
+                key: 'completion',
+                on: completionEnabled,
+                set: setCompletionEnabled,
+                title: t('feature_completion', 'Inline completion'),
+                help: t(
+                  'feature_completion_help',
+                  'Autocomplete suggestions while typing.'
+                ),
+              },
+              {
+                key: 'review',
+                on: reviewEnabled,
+                set: setReviewEnabled,
+                title: t('feature_review', 'Compliance review'),
+                help: t('feature_review_help', 'The whole-document review.'),
+              },
+            ].map(f => (
+              <div key={f.key} className="ol-llm-admin-settings__feature-row">
+                <div>
+                  <span className="ol-llm-admin-settings__feature-title">
+                    {f.title}
+                  </span>
+                  <OLFormText className="ol-llm-admin-settings__no-margin">
+                    {f.help}
+                  </OLFormText>
                 </div>
-              ))}
+                <ToggleSwitch checked={f.on} onChange={f.set} label={f.title} />
+              </div>
+            ))}
           </div>
         </div>
 
@@ -746,6 +817,238 @@ export default function LLMAdminSettingsPage() {
                   moved to Section 5 (AI Prompts). */}
 
         {/* ── Section 6: AI Prompts ── */}
+        {/* overleaf-lab: editable prompts behind each AI feature; empty means built-in default */}
+        <div className="llm-settings-section" data-sec="prompts">
+          <div className="llm-settings-section-header">
+            <span className="llm-settings-section-badge">5</span>
+            <MaterialIcon type="edit_note" />
+            {t('ai_prompts', 'AI Prompts')}
+          </div>
+          <p className="llm-settings-section-desc">
+            {t(
+              'ai_prompts_desc',
+              'Customize the prompts and token budgets behind each AI feature. Leave a field empty to use the built-in default.'
+            )}
+          </p>
+
+          {/* overleaf-lab (2026-08-27): the compliance review's token budgets
+                      moved here from the former admin Compliance Review section.
+                      These are DEPLOYMENT budgets — the review runs each user's
+                      own rubrics (user settings), but the context window and the
+                      answer budget are site-wide. */}
+          <OLFormGroup
+            controlId="llm-max-context-tokens"
+            className="ol-llm-admin-settings__mt-md"
+          >
+            <OLFormLabel>
+              {t('max_context_tokens', 'Review: max context tokens')}
+            </OLFormLabel>
+            <OLFormControl
+              type="number"
+              value={maxContextTokens}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                const parsed = parseInt(e.target.value, 10)
+                if (!isNaN(parsed)) {
+                  setMaxContextTokens(parsed)
+                }
+              }}
+            />
+            <OLFormText>
+              {t(
+                'max_context_tokens_help',
+                'The context window (in tokens) of the review model, as configured on your backend. The review refuses documents that would not fit. No auto-detection.'
+              )}
+            </OLFormText>
+          </OLFormGroup>
+
+          <OLFormGroup
+            controlId="llm-review-max-tokens"
+            className="ol-llm-admin-settings__mt-lg-mb-0"
+          >
+            <OLFormLabel>
+              {t('review_max_tokens', 'Review answer budget (tokens)')}
+            </OLFormLabel>
+            <OLFormControl
+              type="number"
+              value={reviewMaxTokens}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                const parsed = parseInt(e.target.value, 10)
+                if (!isNaN(parsed)) {
+                  setReviewMaxTokens(parsed)
+                }
+              }}
+            />
+            <OLFormText>
+              {t(
+                'review_max_tokens_help',
+                'Upper limit for the answer of each review pass. The actual room adapts to what the document leaves free inside Max context tokens, so a large value here never blocks a long document; it only allows more thorough per-requirement analyses when there is room.'
+              )}
+            </OLFormText>
+          </OLFormGroup>
+
+          {/* overleaf-lab: (a) the three standalone prompts, each with a reset link */}
+          {[
+            {
+              key: 'askAiSystemPrompt',
+              value: askAiSystemPrompt,
+              set: setAskAiSystemPrompt,
+              def: promptDefaults.askAiSystemPrompt,
+              label: t('ask_ai_behavior_prompt', 'Ask AI behavior prompt'),
+              help: t(
+                'ask_ai_behavior_prompt_help',
+                'System prompt for the selection toolbar (Ask AI / paraphrase / rewrite).'
+              ),
+            },
+            {
+              key: 'errorPrompt',
+              value: errorPrompt,
+              set: setErrorPrompt,
+              def: promptDefaults.errorPrompt,
+              label: t('error_help_prompt', 'Error help prompt'),
+              help: t(
+                'error_help_prompt_help',
+                'Instructions appended when a user clicks Ask AI about a compile error.'
+              ),
+            },
+            {
+              key: 'reviewSystemPrompt',
+              value: reviewSystemPrompt,
+              set: setReviewSystemPrompt,
+              def: promptDefaults.reviewSystemPrompt,
+              label: t('review_system_prompt', 'Review system prompt'),
+              help: t(
+                'review_system_prompt_help',
+                'System prompt for the whole-document compliance review.'
+              ),
+            },
+          ].map(field => (
+            <div key={field.key} className="ol-llm-admin-settings__mb-xl">
+              <OLFormGroup
+                controlId={`llm-${field.key}`}
+                className="ol-llm-admin-settings__mb-xs"
+              >
+                <OLFormLabel>{field.label}</OLFormLabel>
+                <OLFormControl
+                  as="textarea"
+                  rows={6}
+                  value={field.value}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                    field.set(e.target.value)
+                  }
+                  className="ol-llm-admin-settings__mono"
+                />
+              </OLFormGroup>
+              <div className="ol-llm-admin-settings__row-between">
+                <OLFormText className="ol-llm-admin-settings__no-margin">
+                  {field.help}
+                </OLFormText>
+                <OLButton
+                  variant="link"
+                  size="sm"
+                  type="button"
+                  onClick={() => field.set(field.def || '')}
+                  className="ol-llm-admin-settings__link-btn"
+                >
+                  <MaterialIcon
+                    type="restart_alt"
+                    className="me-1 ol-llm-admin-settings__icon-base"
+                  />
+                  {t('reset_to_default', 'Reset to default')}
+                </OLButton>
+              </div>
+            </div>
+          ))}
+
+          {/* overleaf-lab: (b) collapsible Ask AI action templates, one textarea per action */}
+          <div className="ol-llm-admin-settings__mt-sm">
+            <OLButton
+              variant="link"
+              size="sm"
+              type="button"
+              onClick={() => setShowActions(v => !v)}
+              className="ol-llm-admin-settings__small-md"
+            >
+              <MaterialIcon
+                type={showActions ? 'expand_less' : 'expand_more'}
+                className="me-1 ol-llm-admin-settings__icon-lg"
+              />
+              {t('ask_ai_action_templates', 'Ask AI action templates')}
+            </OLButton>
+
+            {showActions && (
+              <div className="ol-llm-admin-settings__mt-md">
+                <OLFormText className="ol-llm-admin-settings__help-before">
+                  {t(
+                    'ask_ai_action_help',
+                    'Each template runs on the selected text. Use {{selection}} where the selected text should be inserted; if omitted, it is appended.'
+                  )}
+                </OLFormText>
+                {/* overleaf-lab (audit #7): only the templates the current Ask AI menu actually uses —
+                                  punchy/split/join/summarize/explain/mathFix/checkCitations were removed with the
+                                  menu rebuild, and title/abstract now flow through the generators endpoint. */}
+                {[
+                  'paraphrase',
+                  'academic',
+                  'concise',
+                  'translate',
+                  'synonyms',
+                ].map(key => (
+                  <div key={key} className="ol-llm-admin-settings__mb-lg">
+                    <OLFormGroup
+                      controlId={`llm-action-${key}`}
+                      className="ol-llm-admin-settings__mb-xs"
+                    >
+                      <OLFormLabel>
+                        {t(
+                          `ask_ai_action_${key}`,
+                          key.charAt(0).toUpperCase() + key.slice(1)
+                        )}
+                      </OLFormLabel>
+                      <OLFormControl
+                        as="textarea"
+                        rows={4}
+                        value={askAiActionPrompts[key] || ''}
+                        onChange={(
+                          e: React.ChangeEvent<HTMLTextAreaElement>
+                        ) => {
+                          const value = e.target.value
+                          setAskAiActionPrompts(prev => ({
+                            ...prev,
+                            [key]: value,
+                          }))
+                        }}
+                        className="ol-llm-admin-settings__mono"
+                      />
+                    </OLFormGroup>
+                    <div className="ol-llm-admin-settings__row-end">
+                      <OLButton
+                        variant="link"
+                        size="sm"
+                        type="button"
+                        onClick={() => {
+                          const def =
+                            promptDefaults.askAiActionPrompts?.[key] || ''
+                          setAskAiActionPrompts(prev => ({
+                            ...prev,
+                            [key]: def,
+                          }))
+                        }}
+                        className="ol-llm-admin-settings__link-btn"
+                      >
+                        <MaterialIcon
+                          type="restart_alt"
+                          className="me-1 ol-llm-admin-settings__icon-base"
+                        />
+                        {t('reset_to_default', 'Reset to default')}
+                      </OLButton>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* ── Notifications ── */}
         {showSuccess && (
           <div className="ol-llm-admin-settings__mb-lg">
@@ -793,7 +1096,7 @@ export default function LLMAdminSettingsPage() {
       {/* ── Section 6: Usage (usage meter) — read-only, outside the form ── */}
       <div className="llm-settings-section" data-sec="usage">
         <div className="llm-settings-section-header">
-          <span className="llm-settings-section-badge">5</span>
+          <span className="llm-settings-section-badge">6</span>
           <MaterialIcon type="insights" />
           {t('llm_usage', 'Usage')}
         </div>

@@ -615,18 +615,8 @@ async function llmSettingsPage(req, res) {
   // and the Account Settings card both link here; it used to be a redirect to
   // the generic settings page, which showed no LLM UI at all).
   const allowUser = !!(Settings.llm && Settings.llm.allowUserSettings)
-  // WS5: keep the page-level surface consistent with the API — disabled BYO
-  // deployments answer 403 for the page as well (not just the JSON routes).
-  if (!allowUser) {
-    return res
-      .status(403)
-      .json({
-        ok: false,
-        error: 'disabled',
-        message:
-          'BYO provider settings are disabled on this deployment (LLM_ALLOW_USER_SETTINGS). Use the site backend.',
-      })
-  }
+  // 個人接続が無効でも、参照設定・レビュー基準・使用量の確認は利用できます。
+  // 個人接続の登録・編集APIは、それぞれ従来どおりBYO許可を検証します。
   const userId = SessionManager.getLoggedInUserId(req.session)
   const userDoc = userId ? await User.findOne({ _id: userId }).lean() : null
   const context = {
@@ -818,18 +808,26 @@ async function saveTranslationSettings(req, res) {
 export async function resolveTranslationOverride(userId) {
   const userDoc = await User.findOne({ _id: userId }).lean()
   const settings = normalizeTranslationSettings(userDoc?.llmTranslation)
-  if (!settings.providerId || !isUserSettingsAllowed()) return null
+  if (!settings.providerId) return null
+  const unavailable = () =>
+    Object.assign(
+      new Error(
+        '翻訳用の個人接続先が利用できません。LLM Settingsで接続先を選び直してください。'
+      ),
+      { status: 409 }
+    )
+  if (!isUserSettingsAllowed()) throw unavailable()
   const rows = await loadProviders(userId)
   const row = rows.find(
     r => r.id === settings.providerId && r.enabled !== false
   )
   if (!row || !['openai', 'openaiCompatible'].includes(row.providerType))
-    return null
+    throw unavailable()
   // openai 公式行は baseUrl 空欄が既定仕様 → 公式 URL を補います。
   const baseUrl =
     (row.baseUrl || '').trim() ||
     (row.providerType === 'openai' ? 'https://api.openai.com/v1' : '')
-  if (!baseUrl) return null
+  if (!baseUrl) throw unavailable()
   return {
     baseUrl,
     apiKey: storedToPlaintext(row.apiKey) || '',

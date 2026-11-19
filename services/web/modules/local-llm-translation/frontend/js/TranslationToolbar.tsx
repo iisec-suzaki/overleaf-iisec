@@ -120,6 +120,7 @@ export default function TranslationToolbar({
   const [models, setModels] = useState<Model[]>([])
   const [terms, setTerms] = useState<GlossaryTerm[]>([])
   const [context, setContext] = useState('')
+  const [personalConnection, setPersonalConnection] = useState('')
   const [endpointId, setEndpointId] = useState<string | null>(null)
   const [promptInstructions, setPromptInstructions] = useState('')
   const [defaultPrompt, setDefaultPrompt] = useState('')
@@ -158,6 +159,41 @@ export default function TranslationToolbar({
       setLoading(true)
       setError('')
       try {
+        if (getMeta('ol-ExposedSettings')?.llmEnabled) {
+          const { settings } = await getJSON<{
+            settings: { providerId?: string; model?: string }
+          }>('/user/llm-translation-settings')
+          if (settings.providerId) {
+            const { providers } = await getJSON<{
+              providers: {
+                id: string
+                name: string
+                enabled: boolean
+                models: string[]
+              }[]
+            }>('/user/llm-providers')
+            const row = providers.find(
+              (candidate) =>
+                candidate.id === settings.providerId && candidate.enabled
+            )
+            if (!row)
+              throw new Error(
+                '翻訳用の個人接続先が利用できません。LLM Settingsで選び直してください。'
+              )
+            if (request !== modelsRequestRef.current) return
+            const data = row.models.map((id) => ({ id }))
+            setPersonalConnection(row.name)
+            setModels(data)
+            setSelectedModel(
+              settings.model ||
+                (row.models.includes(preferred)
+                  ? preferred
+                  : row.models[0] || '')
+            )
+            return
+          }
+        }
+        setPersonalConnection('')
         const suffix = endpoint
           ? `?endpoint_id=${encodeURIComponent(endpoint)}`
           : ''
@@ -641,22 +677,39 @@ export default function TranslationToolbar({
                   : bodyStyle
               }
             >
-              <ConnectionSettings
-                endpointId={endpointId}
-                disabled={busy || saving}
-                onSelect={(id) => {
-                  setEndpointId(id)
-                  setResult(null)
-                  setSnapshot(null)
-                  setCompletedPreview('')
-                  setPartialPreview('')
-                  setSelectedModel('')
-                  void loadModels(id)
-                }}
-                onChanged={() => {
-                  void loadModels(endpointId, selectedModel)
-                }}
-              />
+              {getMeta('ol-ExposedSettings')?.llmEnabled && (
+                <p>
+                  <a href="/user/llm-settings" target="_blank" rel="noreferrer">
+                    LLM Settingsで翻訳の個人接続を設定
+                  </a>
+                  {personalConnection && <>（使用中: {personalConnection}）</>}
+                  <button
+                    type="button"
+                    disabled={busy || loading}
+                    onClick={() => void loadModels(endpointId, selectedModel)}
+                  >
+                    再読み込み
+                  </button>
+                </p>
+              )}
+              {!personalConnection && (
+                <ConnectionSettings
+                  endpointId={endpointId}
+                  disabled={busy || saving}
+                  onSelect={(id) => {
+                    setEndpointId(id)
+                    setResult(null)
+                    setSnapshot(null)
+                    setCompletedPreview('')
+                    setPartialPreview('')
+                    setSelectedModel('')
+                    void loadModels(id)
+                  }}
+                  onChanged={() => {
+                    void loadModels(endpointId, selectedModel)
+                  }}
+                />
+              )}
               <label style={fieldStyle}>
                 使用モデル
                 <select

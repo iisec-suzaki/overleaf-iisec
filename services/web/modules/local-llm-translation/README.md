@@ -56,3 +56,7 @@ docker compose -f compose.yaml exec --workdir /overleaf/services/web sharelatex 
 画面の回帰テストは `services/web` で `yarn test:bilingual-ui` を実行します。
 
 翻訳パネルの回帰テストは `services/web` で `yarn test:translation-ui` を実行します。
+
+LLM機能が有効な環境では、LLM Settingsから翻訳専用の個人接続とモデルを選べます。
+パネルの「再読み込み」で反映します。個人接続が未選択なら既存の共有接続を使います。
+削除・無効化された個人接続は自動的に別の接続先へ切り替えず、設定の選び直しを案内します。

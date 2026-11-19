@@ -1,3 +1,12 @@
+import { findSourceFile } from './LLMSourceFile.mjs'
+import ProjectEntityHandler from '../../../../app/src/Features/Project/ProjectEntityHandler.mjs'
+import { getLLMPrompts } from './LLMAdminController.mjs'
+import { chatObject } from './LLMClient.mjs'
+import {
+  compileFixSchema,
+  validateCompileFixObject,
+  buildCompileFixMessages,
+} from './LLMCompileFix.mjs'
 // 利用者のモデル選択と接続先をサーバー側で解決してからモデルを呼び出します。
 // プロジェクト本文は権限確認済みの経路で読み、送信量を制限します。
 
@@ -84,7 +93,7 @@ async function getModels(req, res) {
     return res.json({ models: [], userRows: [] })
   }
   const flags = await getLLMFeatureFlags()
-  if (!flags.chatEnabled) {
+  if (!flags.chatEnabled && !flags.reviewEnabled && !flags.completionEnabled) {
     return res.json({ models: [], userRows: [] })
   }
 
@@ -333,33 +342,27 @@ async function chat(req, res) {
   const userId = SessionManager.getLoggedInUserId(req.session)
 
   if (!validChatMessages(messages)) {
-    return res
-      .status(400)
-      .json({
-        ok: false,
-        error: 'llm-invalid',
-        message:
-          'Invalid conversation or conversation too long; start a new conversation',
-      })
+    return res.status(400).json({
+      ok: false,
+      error: 'llm-invalid',
+      message:
+        'Invalid conversation or conversation too long; start a new conversation',
+    })
   }
   if (Settings.llm && !Settings.llm.enabled) {
-    return res
-      .status(503)
-      .json({
-        ok: false,
-        error: 'llm-disabled',
-        message: 'LLM service is disabled',
-      })
+    return res.status(503).json({
+      ok: false,
+      error: 'llm-disabled',
+      message: 'LLM service is disabled',
+    })
   }
   const flags = await getLLMFeatureFlags()
   if (!flags.chatEnabled) {
-    return res
-      .status(403)
-      .json({
-        ok: false,
-        error: 'feature_disabled',
-        message: 'The chat feature is disabled',
-      })
+    return res.status(403).json({
+      ok: false,
+      error: 'feature_disabled',
+      message: 'The chat feature is disabled',
+    })
   }
 
   // overleaf-lab: F4 — per-user rate + daily token budget (both lanes).
@@ -511,8 +514,731 @@ async function getFeatures(req, res) {
 
 // overleaf-lab: source lines around a compile-error line, for "Ask AI about
 // this error". (Unchanged from the pre-BYO controller.)
+async function completion(req, res) {
+  const projectId = req.params.Project_id
+  const userId = SessionManager.getLoggedInUserId(req.session)
+  const {
+    leftContext,
+    rightContext,
+    maxLength,
+    model: modelRefString,
+  } = req.body
+
+  if (!leftContext && !rightContext) {
+    return res
+      .status(400)
+      .json({ success: false, error: 'No context provided' })
+  }
+  if (Settings.llm && !Settings.llm.enabled) {
+    return res.json({ success: true, data: '' }) // silent: no LLM at all
+  }
+  const flags = await getLLMFeatureFlags()
+  if (!flags.completionEnabled) {
+    return res.json({ success: true, data: '' })
+  }
+
+  // overleaf-lab: F4 — the rate gate here is what makes inline completion safe
+  // to run while typing (per-user, per-minute).
+  let budget
+  try {
+    budget = await guardLLMCall(userId)
+  } catch (err) {
+    // Silent for completion: the editor simply shows no suggestion, with no
+    // error toast (same semantics as disabled features).
+    logger.debug({ userId, code: err?.code }, '[LLM] completion: budget gate')
+    return res.json({ success: true, data: '' })
+  }
+
+  // Resolve the lane. overleaf-lab (2026-08-27, owner request): the client no
+  // longer sends a model — order is the user's SHARED selection (profile),
+  // then the first enabled BYO row, then the site backend. The former admin
+  // "Inline completion model" picker is gone; deployments WITHOUT a global
+  // LLM work through the same chain (BYO row or profile selection).
+  const adminSettings = await getAdminLLMSettings()
+  let ref = parseModelRef(modelRefString)
+  let refFromProfile = false
+  if (!ref.model) {
+    const profile = await User.findOne({ _id: userId })
+      .lean()
+      .catch(() => null)
+    // 機能別 AI 選択（インライン補完）が共有選択より優先します。
+    const featureValue =
+      typeof profile?.llmFeatureModels?.completion === 'string'
+        ? profile.llmFeatureModels.completion.trim()
+        : ''
+    const profileValue =
+      featureValue ||
+      (typeof profile?.llmSelectedModel === 'string'
+        ? profile.llmSelectedModel.trim()
+        : '')
+    if (profileValue) {
+      try {
+        ref = parseModelRef(profileValue)
+        refFromProfile = true
+      } catch {
+        /* stale/invalid saved selection - fall through to the chain below */
+      }
+    }
+  }
+  const adminSharedCompletionDisabled =
+    adminSettings.completionModel === '__disabled__'
+  const siteCompletionModel =
+    adminSettings.completionModel !== '__disabled__'
+      ? adminSettings.completionModel ||
+        process.env.LLM_COMPLETION_MODEL ||
+        (process.env.LLM_MODEL_NAME || '').split(',')[0].trim()
+      : null
+
+  const candidates = []
+  if (ref.kind === 'user') candidates.push({ lane: 'user', ref })
+  else if (!ref.model && isUserSettingsAllowed())
+    candidates.push({ lane: 'user', ref: { rowId: null } })
+  if (
+    !adminSharedCompletionDisabled &&
+    (adminSettings.llmApiUrl || process.env.LLM_API_URL) &&
+    (adminSettings.allowedModels?.length ||
+      process.env.LLM_AVAILABLE_MODELS ||
+      process.env.LLM_MODEL_NAME)
+  ) {
+    if (adminSettings.allowedModels?.length) {
+      if (
+        !refFromProfile &&
+        ref.kind === 'site' &&
+        ref.model &&
+        !adminSettings.allowedModels.includes(ref.model)
+      ) {
+        // explicit model not allowed -> reject (F2); a profile-derived
+        // ref just fails this candidate and continues the chain
+        return res.status(400).json({
+          success: false,
+          error: `Model "${ref.model}" is not available`,
+        })
+      }
+    }
+    candidates.push({ lane: 'site', ref })
+  }
+
+  const started = Date.now()
+  let lastError = null
+  for (const candidate of candidates) {
+    try {
+      const resolved =
+        candidate.lane === 'user'
+          ? { ...(await resolveUserLane(userId, candidate.ref)), lane: 'user' }
+          : {
+              ...resolveSiteSpec(
+                adminSettings,
+                ref.model || siteCompletionModel
+              ),
+              lane: 'site',
+            }
+      const systemPrompt =
+        '/no_think\nYou are a text completion engine. Output ONLY the missing text, in the same language as the surrounding text. No thinking, no explanation, no markdown, no code fences, no tags. Just the raw continuation characters.'
+      const userPrompt = `Complete the text at [CURSOR]. Output only the few words that replace [CURSOR]:\n\n${leftContext}[CURSOR]${rightContext}`
+      const maxTokens = Math.max(
+        16,
+        Math.min(1024, parseInt(maxLength, 10) || 320)
+      )
+      const { text, usage } = await chatText(
+        resolved.spec,
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        {
+          maxOutputTokens: maxTokens,
+          temperature: 0.2,
+          timeoutMs: 15000,
+          usageMeta: {
+            userId,
+            action: 'completion',
+            lane: resolved.lane,
+            projectId,
+          }, // overleaf-lab (usage meter)
+        }
+      )
+      const data = text || ''
+      budget.record(usage?.outputTokens)
+      logger.debug(
+        {
+          projectId,
+          lane: resolved.lane,
+          model: resolved.model,
+          len: data.length,
+          duration: `${Date.now() - started}ms`,
+        },
+        '[LLM] completion: ok'
+      )
+      return res.json({
+        success: true,
+        data,
+        model: resolved.model,
+        lane: resolved.lane,
+      })
+    } catch (err) {
+      lastError = err
+      logger.debug(
+        { lane: candidate.lane, code: err?.code, message: err?.message },
+        '[LLM] completion: lane failed, trying next'
+      )
+    }
+  }
+
+  const error =
+    lastError ||
+    Object.assign(new Error('No usable LLM backend configured'), {
+      code: 'llm-disabled',
+    })
+  if (error.code === 'disabled' || error.code === 'llm-bad-row') {
+    // No valid BYO lane is allowed/configured: silent empty suggestion.
+    return res.json({ success: true, data: '' })
+  }
+  logger.warn(
+    { projectId, err: error.message, code: error.code },
+    '[LLM] completion: all lanes failed'
+  )
+  const status =
+    error.code === 'auth' ? 401 : error.code === 'llm-disabled' ? 503 : 502
+  return res.status(status).json({
+    success: false,
+    error: error.code || 'Completion failed',
+    message: error.message,
+  })
+}
+
+/*
+ * Site lane spec builder (inline to avoid the circular-resolve dance used in
+ * resolveSiteLane, which also enforces the allowlist on explicit ids).
+ */
+function resolveSiteSpec(adminSettings, modelName) {
+  const baseUrl = adminSettings.llmApiUrl || process.env.LLM_API_URL
+  const apiKey = adminSettings.llmApiKey
+    ? decryptSecret(adminSettings.llmApiKey)
+    : process.env.LLM_API_KEY || ''
+  const providerType =
+    adminSettings.llmProviderType ||
+    adminSettings.llmApiType ||
+    detectProviderType(baseUrl)
+  const pool =
+    Array.isArray(adminSettings.allowedModels) &&
+    adminSettings.allowedModels.length
+      ? adminSettings.allowedModels
+      : (process.env.LLM_AVAILABLE_MODELS || process.env.LLM_MODEL_NAME || '')
+          .split(',')
+          .map(m => m.trim())
+          .filter(Boolean)
+  const model = modelName || pool[0]
+  const spec = normalizeProviderSpec(
+    { providerType, baseUrl, apiKey },
+    { model }
+  )
+  return { spec, model: spec.model }
+}
+
+async function getSourceContext(req, res) {
+  const flags = await getLLMFeatureFlags()
+  if (!flags.chatEnabled) {
+    return res.json({ ok: false, error: 'feature_disabled' })
+  }
+
+  const projectId = req.params.Project_id
+  const rawFile = String(req.query.file || '')
+  const line = parseInt(req.query.line, 10)
+  let radius = parseInt(req.query.radius, 10)
+  if (!Number.isFinite(radius) || radius < 0) {
+    radius = 15
+  }
+  radius = Math.min(radius, 40)
+
+  if (!rawFile || !Number.isFinite(line) || line < 1) {
+    return res.json({ ok: false, error: 'bad_request' })
+  }
+
+  try {
+    const docsByPath = await ProjectEntityHandler.promises.getAllDocs(projectId)
+    const match = findSourceFile(docsByPath, rawFile)
+    if (!match) {
+      return res.json({ ok: false, error: 'not_found' })
+    }
+
+    const lines = match.lines
+    const idx = line - 1
+    const start = Math.max(0, idx - radius)
+    const end = Math.min(lines.length, idx + radius + 1)
+    const numbered = []
+    for (let i = start; i < end; i++) {
+      const marker = i === idx ? '>' : ' '
+      numbered.push(`${marker} ${i + 1}: ${lines[i]}`)
+    }
+    return res.json({
+      ok: true,
+      file: match.path,
+      line,
+      startLine: start + 1,
+      snippet: numbered.join('\n'),
+    })
+  } catch (err) {
+    logger.warn({ projectId, err }, '[LLM] source-context failed')
+    return res.json({ ok: false, error: 'failed' })
+  }
+}
+
+async function getPrompts(req, res) {
+  const prompts = await getLLMPrompts()
+  res.json({
+    askAiSystemPrompt: prompts.askAiSystemPrompt,
+    errorPrompt: prompts.errorPrompt,
+    askAiActionPrompts: prompts.askAiActionPrompts,
+  })
+}
+
+// overleaf-lab: AI Error Assist — suggested fix per compile log entry
+// (upstream-style: explanation + exact suggested code, driven by the shared
+// "Select LLM Model" choice — site lane or any BYO row).
+async function compileFix(req, res) {
+  const projectId = req.params.Project_id
+  const userId = SessionManager.getLoggedInUserId(req.session)
+
+  if (Settings.llm && !Settings.llm.enabled) {
+    return res.status(503).json({
+      ok: false,
+      error: 'llm-disabled',
+      message: 'LLM service is disabled',
+    })
+  }
+  const flags = await getLLMFeatureFlags()
+  if (!flags.chatEnabled) {
+    return res.status(403).json({
+      ok: false,
+      error: 'feature_disabled',
+      message: 'The LLM assist feature is disabled',
+    })
+  }
+
+  const body = req.body || {}
+  const file = String(body.file || '')
+  const line = parseInt(body.line, 10)
+  const level = String(body.level || 'error')
+  const message = String(body.message || '').slice(0, 2000)
+  // "Suggest a different fix": the previous suggestion, to be avoided.
+  const hint =
+    body.hint && typeof body.hint === 'object'
+      ? {
+          old: String(body.hint.old || '').slice(0, 3000),
+          new: String(body.hint.new || '').slice(0, 3000),
+        }
+      : null
+  if (!file || !Number.isFinite(line) || line < 1) {
+    return res.status(400).json({
+      ok: false,
+      error: 'bad_request',
+      message: 'file and line are required',
+    })
+  }
+
+  // overleaf-lab: the same per-user rate + daily token budget gate as chat.
+  let budget
+  try {
+    budget = await guardLLMCall(userId)
+  } catch (err) {
+    return sendError(res, err, 429)
+  }
+
+  let lane
+  let spec
+  let model
+  try {
+    const resolved = await resolveLane(
+      userId,
+      parseModelRef(body.model),
+      'compileFix'
+    )
+    lane = resolved.lane
+    spec = resolved.spec
+    model = resolved.model
+  } catch (err) {
+    return sendError(res, err, 400)
+  }
+
+  // Numbered source window around the failing line (same matching logic
+  // as /llm/source-context, inlined to keep one round trip).
+  let ctx
+  try {
+    const radius = 12
+    const docsByPath = await ProjectEntityHandler.promises.getAllDocs(projectId)
+    const match = findSourceFile(docsByPath, file)
+    if (!match) {
+      return res.status(404).json({
+        ok: false,
+        error: 'not_found',
+        message: 'Source file not found in the project',
+      })
+    }
+    const lines = match.lines
+    const idx = line - 1
+    const start = Math.max(0, idx - radius)
+    const end = Math.min(lines.length, idx + radius + 1)
+    const numbered = []
+    for (let i = start; i < end; i++) {
+      numbered.push(`${i === idx ? '>' : ' '} ${i + 1}: ${lines[i]}`)
+    }
+    ctx = {
+      path: match.path,
+      line,
+      startLine: start + 1,
+      snippet: numbered.join('\n'),
+    }
+  } catch (err) {
+    logger.warn({ projectId, err }, '[LLM] compile-fix: source context failed')
+    return res.status(500).json({
+      ok: false,
+      error: 'failed',
+      message: 'Could not read the source file',
+    })
+  }
+
+  // The admin-editable error prompt (site lane only) sets the spirit of the
+  // answer; the JSON contract from LLMCompileFix.mjs is always enforced.
+  const prompts = await getLLMPrompts()
+  const adminPrompt = lane === 'site' ? prompts.errorPrompt || '' : ''
+  const messages = buildCompileFixMessages({
+    level,
+    file: ctx.path,
+    line: ctx.line,
+    message,
+    snippet: ctx.snippet,
+    hint: hint ? { old: hint.old, new: hint.new } : '',
+    adminPrompt,
+  })
+
+  const started = Date.now()
+  logger.info(
+    { projectId, lane, model, file: ctx.path, line: ctx.line },
+    '[LLM] compile-fix: sending request'
+  )
+  // overleaf-lab: small provider retry — structured-output misses on
+  // prompt-based backends ("No object generated" / empty response) are
+  // flaky, so give the model one more chance before failing the request.
+  let lastErr = null
+  const nudged = [
+    messages[0],
+    {
+      role: 'user',
+      content:
+        messages[1].content +
+        '\n\nREMINDER: answer with ONLY the JSON object described in the system prompt — no fences, no prose, all four fields.',
+    },
+  ]
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const { object, usage } = await chatObject(
+        spec,
+        attempt === 1 ? messages : nudged,
+        compileFixSchema,
+        {
+          temperature: 0.4,
+          maxOutputTokens: 8000,
+          timeoutMs: 180000,
+          usageMeta: { userId, action: 'compile-fix', lane, projectId }, // overleaf-lab (usage meter)
+        }
+      )
+      const clean = validateCompileFixObject(object)
+      budget.record(usage?.outputTokens)
+      logger.info(
+        {
+          projectId,
+          lane,
+          model,
+          attempt,
+          duration: `${Date.now() - started}ms`,
+          chars: clean.suggestedNew.length,
+        },
+        '[LLM] compile-fix: ok'
+      )
+      return res.json({
+        ok: true,
+        file: ctx.path,
+        line: ctx.line,
+        startLine: ctx.startLine,
+        snippet: ctx.snippet,
+        explanation: clean.explanation,
+        suggestedOld: clean.suggestedOld,
+        suggestedNew: clean.suggestedNew,
+        span: clean.span,
+        lane,
+        model,
+      })
+    } catch (err) {
+      lastErr = err
+      const flaky =
+        err &&
+        (err.code === 'empty-response' ||
+          /did not match schema|No object generated/i.test(err.message || ''))
+      if (flaky && attempt < 2) {
+        logger.warn(
+          { projectId, err: err?.message },
+          '[LLM] compile-fix: retrying (structured-output miss)'
+        )
+        continue
+      }
+      break
+    }
+  }
+  if (lastErr && lastErr.code === 'llm-bad-fix') {
+    return res.status(422).json({
+      ok: false,
+      error: 'llm-bad-fix',
+      message:
+        'The model did not return a usable suggestion — please try again.',
+    })
+  }
+  if (
+    lastErr &&
+    (lastErr.code === 'empty-response' ||
+      /did not match schema|No object generated/i.test(lastErr.message || ''))
+  ) {
+    return res.status(422).json({
+      ok: false,
+      error: 'llm-bad-fix',
+      message:
+        'The model did not return a usable suggestion — please try again.',
+    })
+  }
+  sendError(res, lastErr, 502)
+}
+
+// overleaf-lab: whole-document generators (title/abstract/keywords).
+// Budgets raised for reasoning models (thinking consumes output budget).
+const GENERATOR_TYPES = {
+  title: {
+    maxOutputTokens: 4000,
+    temperature: 0.4,
+    instruction:
+      "Write ONE concise, grammatically correct title for the document below, in the same language as the document's main body text. " +
+      'Return ONLY the title text — no quotes, no numbering, no explanation.',
+  },
+  abstract: {
+    maxOutputTokens: 8000,
+    temperature: 0.3,
+    instruction:
+      "Write a structured abstract (150–250 words) for the document below, in the same language as the document's main body text: " +
+      'purpose, methods, key results/findings, and conclusion in that order. ' +
+      'Return ONLY the abstract text — no heading, no quotes, no explanation.',
+  },
+  keywords: {
+    maxOutputTokens: 4000,
+    temperature: 0.2,
+    instruction:
+      'Generate 5–8 keyword phrases for the document below that capture its ' +
+      "core topics, methods, and domain, in the same language as the document's main body text. Return ONLY the keywords, " +
+      'separated by commas, in order of importance.',
+  },
+}
+
+async function generateDocument(req, res) {
+  const { type, model: modelRefString } = req.body
+  const projectId = req.params.Project_id
+  const userId = SessionManager.getLoggedInUserId(req.session)
+
+  const generator = GENERATOR_TYPES[type]
+  if (!generator) {
+    return res.status(400).json({
+      ok: false,
+      error: 'llm-invalid',
+      message: `Unknown generator type. Expected one of: ${Object.keys(GENERATOR_TYPES).join(', ')}`,
+    })
+  }
+  if (Settings.llm && !Settings.llm.enabled) {
+    return res.status(503).json({
+      ok: false,
+      error: 'llm-disabled',
+      message: 'LLM service is disabled',
+    })
+  }
+  const flags = await getLLMFeatureFlags()
+  if (!flags.chatEnabled) {
+    return res.status(403).json({
+      ok: false,
+      error: 'feature_disabled',
+      message: 'The chat feature is disabled',
+    })
+  }
+
+  let budget
+  try {
+    budget = await guardLLMCall(userId)
+  } catch (err) {
+    return sendError(res, err, 429)
+  }
+
+  let lane
+  let spec
+  let model
+  try {
+    const resolved = await resolveLane(
+      userId,
+      parseModelRef(modelRefString),
+      'generate'
+    )
+    lane = resolved.lane
+    spec = resolved.spec
+    model = resolved.model
+  } catch (err) {
+    // overleaf-lab: a broken/stale BYO row must not hard-fail the whole-document
+    // generators when this deployment also has a working site backend (parity
+    // with the completion endpoint's lane chain). resolveSiteLane() throws
+    // when no site backend is configured, so this is a safe no-op otherwise.
+    const site = await resolveSiteLane()
+      .then(s => ({ ...s, lane: 'site' }))
+      .catch(() => null)
+    if (site) {
+      lane = site.lane
+      spec = site.spec
+      model = site.model
+      logger.info(
+        { userId, err: err?.message },
+        '[LLM] generate: user lane failed, using site lane'
+      )
+    }
+    if (!lane) {
+      return res.status(503).json({
+        ok: false,
+        error: err?.code || 'llm-disabled',
+        message: err?.message || 'No LLM backend is configured',
+      })
+    }
+  }
+
+  try {
+    // Whole-project document text (LaTeX sources first), with per-file and
+    // total caps so worst-case prompts fit typical context windows.
+    const docsByPath =
+      (await ProjectEntityHandler.promises.getAllDocs(projectId)) || {}
+    const entries = Object.entries(docsByPath).filter(
+      ([, v]) => v && Array.isArray(v.lines)
+    )
+    const isTex = p => /\.(tex|sty|cls|bib)$/i.test(String(p))
+    entries.sort((a, b) => Number(isTex(b[0])) - Number(isTex(a[0])))
+
+    const perFileCap = 60000
+    const totalCap = 240000
+    let docText = ''
+    const included = []
+    for (const [docPath, value] of entries) {
+      if (docText.length >= totalCap) break
+      const text = (value.lines || []).join('\n')
+      if (!text.trim()) continue
+      const clipped =
+        text.length > perFileCap
+          ? text.slice(0, perFileCap) + '\n[...truncated...]'
+          : text
+      docText += `===== FILE: ${docPath} =====\n${clipped}\n\n`
+      included.push(docPath)
+    }
+    if (!docText.trim()) {
+      return res.status(422).json({
+        ok: false,
+        error: 'no_document',
+        message: 'The project contains no readable document file',
+      })
+    }
+
+    const systemPrompt = lane === 'site' ? (await getSystemPrompt()) || '' : ''
+    const templates = (await getLLMPrompts()).askAiActionPrompts || {}
+    const styleGuidance = templates[type]
+      ? `STYLE GUIDANCE from the author's template: ${templates[type]}\n\n`
+      : ''
+
+    const messages = []
+    if (systemPrompt) messages.push({ role: 'system', content: systemPrompt })
+    messages.push({
+      role: 'user',
+      content: `${styleGuidance}${generator.instruction}\n\nDOCUMENT:\n${docText}`,
+    })
+
+    // overleaf-lab (owner bug report #2): several instruct models answer
+    // document-generation requests with a FABRICATED TOOL CALL such as
+    // `tool call: get_keywords_from_document("/main.tex")` instead of the
+    // requested text. Mitigations: a hard no-tool-call instruction on
+    // every attempt, one nudge-retry when the output still looks like a
+    // tool call, then a clear, actionable error (never show the gibberish
+    // as the "result").
+    const NO_TOOLS =
+      ' Do not call, name, or simulate any tool, function, or API (never output lines such as "tool call: ..." or "function ..."). Answer directly with the requested text only.'
+    messages[messages.length - 1].content += NO_TOOLS
+
+    const started = Date.now()
+    let text = ''
+    let usage = null
+    const baseUserContent = messages[messages.length - 1].content
+    const prefix = messages.slice(0, -1)
+    let toolish = false
+    for (let attempt = 1; attempt <= 2 && !text; attempt++) {
+      const userContent =
+        attempt === 1
+          ? baseUserContent
+          : `${baseUserContent}\n\nReminder (second attempt): produce the plain ${type} text now. No tool calls, no function names, no placeholders, no code fences.`
+      const r = await chatText(
+        spec,
+        [...prefix, { role: 'user', content: userContent }],
+        {
+          maxOutputTokens: generator.maxOutputTokens,
+          temperature: generator.temperature,
+          timeoutMs: 300000,
+          usageMeta: { userId, action: `generate-${type}`, lane, projectId }, // overleaf-lab (usage meter)
+        }
+      )
+      usage = r.usage || usage
+      toolish = /^(tool|function)\s*call\b|^\s*get_[a-z0-9_]+\(/im.test(
+        (r.text || '').trim()
+      )
+      if (!toolish) {
+        text = (r.text || '').trim()
+      }
+    }
+    if (toolish) {
+      throw Object.assign(
+        new Error(
+          'The model answered with a tool-call-like response instead of the requested text. Choose a different model (File → Select LLM Model) and try again.'
+        ),
+        { code: 'llm-tool-call-output' }
+      )
+    }
+    assertNonEmpty(text)
+    budget.record(usage?.outputTokens)
+
+    logger.info(
+      {
+        projectId,
+        lane,
+        model,
+        type,
+        files: included.length,
+        chars: docText.length,
+        duration: `${Date.now() - started}ms`,
+      },
+      '[LLM] generateDocument: ok'
+    )
+    res.json({
+      ok: true,
+      type,
+      output: text.trim(),
+      model,
+      lane,
+      files: included.length,
+    })
+  } catch (err) {
+    sendError(res, err, 502)
+  }
+}
+
 export default {
   chat: expressify(chat),
   getModels: expressify(getModels),
+  completion: expressify(completion),
   getFeatures: expressify(getFeatures),
+  getSourceContext: expressify(getSourceContext),
+  getPrompts: expressify(getPrompts),
+  compileFix: expressify(compileFix),
+  generateDocument: expressify(generateDocument),
 }
