@@ -256,11 +256,9 @@ async function addProvider(req, res) {
   const blocked = assertPublicOr400(res, parsed.data.baseUrl)
   if (blocked) return blocked
 
-  const user = await User.findById(
-    userId,
-    'llmProviders llmApiUrl llmModelName'
-  )
-  const existing = Array.isArray(user?.llmProviders) ? user.llmProviders : []
+  // 旧設定の移行も含めて件数を確認します。追加時は配列全体を上書きせず、
+  // MongoDB内で上限を判定して追記し、同時追加された別の接続先を失わないようにします。
+  const existing = await loadProviders(userId)
   if (existing.length >= MAX_PROVIDERS_PER_USER) {
     return res
       .status(400)
@@ -277,31 +275,34 @@ async function addProvider(req, res) {
     apiKey: parsed.data.apiKey ? encryptSecret(parsed.data.apiKey) : '',
     createdAt: new Date().toISOString(),
   }
-  // Persisting the legacy migration as row #1 too, so the virtual row gains
-  // a real id on first write.
-  const migrated =
-    existing.length === 0
-      ? (await loadProviders(userId)).map(r => ({
-          ...r,
-          id: r.id === 'legacy' ? makeRowId() : r.id,
-          apiKey: normalizeStoredSecret(r.apiKey),
-        }))
-      : []
-  const merged = [...migrated, ...existing, row]
-  // サイト共通接続だけの利用者にも参照設定・使用量を表示します。
-  // 個人の接続先を変更するAPIは、それぞれBYO許可を検証します。
+  const result = await User.updateOne(
+    {
+      _id: userId,
+      $expr: {
+        $lt: [{ $size: { $ifNull: ['$llmProviders', []] } }, MAX_PROVIDERS_PER_USER],
+      },
+    },
+    { $push: { llmProviders: row } }
+  )
+  if (!result.modifiedCount) {
+    return res.status(409).json({ ok: false, error: 'conflict', message: 'Provider list changed or its limit was reached; reload settings.' })
+  }
+  res.status(201).json({ ok: true, provider: publicRow(row) })
+}
+
+async function updateProvider(req, res) {
+  // 追加と更新は独立したハンドラーです。POSTの更新経路でも本人とBYO許可を検証します。
+  if (!(await requireUserSettingsAllowed(req, res))) return
   const userId = SessionManager.getLoggedInUserId(req.session)
   const rowId = req.params.id
-  const user = await User.findById(
-    userId,
-    'llmProviders llmApiUrl llmApiKey llmModelName llmModels llmModelNames llmCompletionModel llmCompletionModels llmApiType useOwnLLMSettings'
-  )
   const current = (await loadProviders(userId)).find(r => r.id === rowId)
   if (!current) return res.status(404).json({ ok: false, error: 'not-found' })
 
   // Partial update: merge over current row, then validate the full shape.
   const merged = {
     ...current,
+    // 保存済みの暗号文ではなく、今回入力された平文だけをスキーマで検証します。
+    apiKey: req.body?.apiKey ?? '',
     name: req.body?.name ?? current.name,
     providerType: req.body?.providerType ?? current.providerType,
     baseUrl:
@@ -327,29 +328,27 @@ async function addProvider(req, res) {
   if (assertPublicOr400(res, parsed.data.baseUrl)) return
 
   let apiKey = normalizeStoredSecret(current.apiKey || '')
-  if (req.body?.clearApiKey) apiKey = ''
-  else if (req.body?.apiKey && req.body.apiKey.trim() !== '')
-    apiKey = encryptSecret(req.body.apiKey)
+  if (req.body?.clearApiKey === true) apiKey = ''
+  else if (parsed.data.apiKey) apiKey = encryptSecret(parsed.data.apiKey)
 
-  const rows = (
-    Array.isArray(user?.llmProviders)
-      ? user.llmProviders
-      : await loadProviders(userId)
-  ).map(r =>
-    r.id === rowId || r.id === 'legacy'
-      ? {
-          ...parsed.data,
-          id: rowId === 'legacy' ? makeRowId() : rowId,
-          apiKey,
-          createdAt: new Date().toISOString(),
-        }
-      : r
+  const row = {
+    ...parsed.data,
+    id: current.id,
+    apiKey,
+    createdAt: current.createdAt || new Date().toISOString(),
+  }
+  // 対象の一行だけを置換します。他の接続先・legacy行・作成日時・モデル参照のIDは保持します。
+  const result = await User.updateOne(
+    { _id: userId, 'llmProviders.id': rowId },
+    { $set: { 'llmProviders.$': row } }
   )
-  await User.updateOne({ _id: userId }, { $set: { llmProviders: rows } })
+  if (!result.modifiedCount && !result.matchedCount) {
+    return res.status(409).json({ ok: false, error: 'conflict', message: 'Provider changed or was removed; reload settings.' })
+  }
   logger.info({ userId, rowId }, '[LLM] updateProvider: row updated')
   res.json({
     ok: true,
-    provider: publicRow({ ...parsed.data, id: rowId, apiKey }),
+    provider: publicRow(row),
   })
 }
 
