@@ -279,7 +279,7 @@ export default function TranslationToolbar({
   if (!isLatex || !permissions.write) return null
 
   /** 用語集・モデル・文体メモをプロジェクト設定として保存します。 */
-  const saveSettings = async () => {
+  const saveSettings = async (promptOverride?: string) => {
     setSaving(true)
     setError('')
     try {
@@ -293,18 +293,34 @@ export default function TranslationToolbar({
             model: selectedModel || null,
             context,
             endpoint_id: endpointId,
-            prompt_instructions: promptInstructions,
+            prompt_instructions: promptOverride ?? promptInstructions,
           },
         }
       )
       setTerms(updated.terms || [])
-      setNotice('翻訳設定を保存しました。')
+      setNotice('用語集・文書コンテキスト・システムプロンプトを保存しました。')
       return true
     } catch (saveError) {
       setError(getErrorMessage(saveError))
       return false
     } finally {
       setSaving(false)
+    }
+  }
+
+  /** システムプロンプトを既定文へワンクリックで戻します（保存も同時に行う）。 */
+  const resetPromptToDefault = async () => {
+    if (
+      !window.confirm(
+        'システムプロンプトを既定文に戻します。現在の自作指示は削除されます。よろしいですか？'
+      )
+    ) {
+      return
+    }
+    setPromptInstructions('')
+    const saved = await saveSettings('')
+    if (saved) {
+      setNotice('システムプロンプトを既定文に戻して保存しました。')
     }
   }
 
@@ -650,9 +666,9 @@ export default function TranslationToolbar({
               <div>
                 <h2
                   id="local-llm-translation-title"
-                  style={{ margin: 0, fontSize: 20 }}
+                  style={{ margin: 0, fontSize: 17 }}
                 >
-                  日本語から英語へ翻訳
+                  英語翻訳
                 </h2>
                 <div style={{ color: 'var(--content-secondary-themed)', marginTop: 4 }}>
                   LLM: {selectedModel || '未選択'}
@@ -760,10 +776,10 @@ export default function TranslationToolbar({
 
               <details style={{ marginBottom: 14 }}>
                 <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
-                  用語集と文書コンテキスト
+                  用語集・文書コンテキスト・システムプロンプト
                 </summary>
                 <p style={{ color: 'var(--content-secondary-themed)', margin: '8px 0' }}>
-                  用語集と概要はプロジェクト単位で保存し、翻訳の各チャンクに渡します。
+                  用語集・概要・システムプロンプトはプロジェクト単位で保存し、翻訳の各チャンクに渡します。
                 </p>
                 {terms.map((term, index) => (
                   <div
@@ -839,18 +855,31 @@ export default function TranslationToolbar({
                   />
                 </label>
                 <label style={fieldStyle}>
-                  翻訳の文体指示
+                  システムプロンプト（スタイル・役割の指示）
                   <textarea
                     className="form-control"
-                    rows={3}
+                    rows={4}
                     maxLength={4000}
                     value={promptInstructions}
-                    placeholder={defaultPrompt}
+                    placeholder={
+                      '空欄なら既定のシステムプロンプトを使います。例:\n' +
+                      defaultPrompt
+                    }
                     onChange={(event) =>
                       setPromptInstructions(event.target.value)
                     }
                   />
                 </label>
+                <p
+                  style={{
+                    color: 'var(--content-secondary-themed)',
+                    margin: '4px 0 8px',
+                    fontSize: 12,
+                  }}
+                >
+                  空欄 = 既定文。翻訳のトーン・役割の指示だけ差し替わります。保護マーカー維持などの
+                  検証前提の指示は常に自動で添えられます。
+                </p>
                 <button
                   type="button"
                   className={
@@ -859,22 +888,24 @@ export default function TranslationToolbar({
                       : 'btn btn-secondary'
                   }
                   disabled={saving || busy}
-                  onClick={() => setPromptInstructions('')}
+                  onClick={() => void saveSettings()}
                 >
-                  文体指示を既定に戻す
+                  {saving ? '保存中…' : '用語集・プロンプトを保存'}
                 </button>
-                <button
-                  type="button"
-                  className={
-                    embedded
-                      ? 'btn btn-secondary text-wrap'
-                      : 'btn btn-secondary'
-                  }
-                  disabled={saving || busy}
-                  onClick={saveSettings}
-                >
-                  {saving ? '保存中…' : '翻訳設定を保存'}
-                </button>
+                {promptInstructions !== '' && (
+                  <button
+                    type="button"
+                    className={
+                      embedded
+                        ? 'btn btn-secondary text-wrap'
+                        : 'btn btn-secondary'
+                    }
+                    disabled={saving || busy}
+                    onClick={() => void resetPromptToDefault()}
+                  >
+                    プロンプトを既定文に戻す
+                  </button>
+                )}
               </details>
 
               <label
@@ -992,7 +1023,7 @@ export default function TranslationToolbar({
                       }
                       onClick={() => saveEnglishDocument(false)}
                     >
-                      英語版 .tex として保存
+                      英語版 .tex 保存
                     </button>
                     <button
                       type="button"
@@ -1009,7 +1040,7 @@ export default function TranslationToolbar({
                       }
                       onClick={() => saveEnglishDocument(true)}
                     >
-                      {saving ? '保存中…' : '保存して英語版をメイン文書に設定'}
+                      {saving ? '保存中…' : '保存し英語版をメイン文書に'}
                     </button>
                   </>
                 ) : (
@@ -1051,7 +1082,7 @@ export default function TranslationToolbar({
                         >
                           {saving
                             ? '保存中…'
-                            : '訳済み部分だけ英語版 .tex に保存（草稿）'}
+                            : '訳済み部分だけ .en.tex に保存'}
                         </button>
                       )}
                       <button

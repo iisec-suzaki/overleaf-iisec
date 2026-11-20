@@ -68,7 +68,7 @@ vi.mock('@/utils/meta', () => ({ default: () => 'csrf' }))
 vi.mock('../frontend/js/ConnectionSettings', () => ({ default: () => null }))
 
 const confirmed = '\\begin{document}\nConfirmed English\n'
-const draftName = '訳済み部分だけ英語版 .tex に保存（草稿）'
+const draftName = '訳済み部分だけ .en.tex に保存'
 let stream: ReadableStreamDefaultController<Uint8Array>
 function event(value: unknown) {
   stream.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(value)}\n\n`))
@@ -140,7 +140,7 @@ describe('translation draft recovery', () => {
     await start()
     await fail()
     expect(
-      screen.queryByRole('button', { name: '保存して英語版をメイン文書に設定' })
+      screen.queryByRole('button', { name: '保存し英語版をメイン文書に' })
     ).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: draftName }))
     await waitFor(() =>
@@ -265,7 +265,7 @@ describe('translation draft recovery', () => {
       stream.close()
     })
     fireEvent.click(
-      await screen.findByRole('button', { name: '英語版 .tex として保存' })
+      await screen.findByRole('button', { name: '英語版 .tex 保存' })
     )
     await waitFor(() =>
       expect(mock.put).toHaveBeenCalledWith(
@@ -285,7 +285,7 @@ it('opens the embedded panel once and keeps a stopped draft when the editor beco
   expect(screen.queryByRole('dialog')).toBeNull()
   expect(screen.queryByRole('button', { name: '閉じる' })).toBeNull()
   expect(
-    screen.getByRole('region', { name: '日本語から英語へ翻訳' })
+    screen.getByRole('region', { name: '英語翻訳' })
   ).toBeTruthy()
   fireEvent.click(screen.getByRole('checkbox'))
   fireEvent.click(screen.getByRole('button', { name: '確認して翻訳' }))
@@ -321,4 +321,34 @@ it('opens the saved English document through the shared side-panel event', async
   } finally {
     window.removeEventListener('overleaf:open-bilingual-editor', listener)
   }
+})
+
+it('restores the prompt to the default with a confirmation and saves it right away', async () => {
+  mock.get.mockImplementation((url: string) =>
+    Promise.resolve(
+      url.includes('/models')
+        ? { data: [{ id: 'test' }] }
+        : {
+            terms: [],
+            model: 'test',
+            context: '',
+            prompt_instructions: 'my custom rules',
+          }
+    )
+  )
+  render(<TranslationToolbar embedded />)
+  const reset = await screen.findByRole('button', {
+    name: 'プロンプトを既定文に戻す',
+  })
+  fireEvent.click(reset)
+  await waitFor(() =>
+    expect(
+      mock.put.mock.calls.some(
+        ([url, options]) =>
+          url.includes('/settings') &&
+          (options as { body: { prompt_instructions: string } }).body
+            .prompt_instructions === ''
+      )
+    ).toBe(true)
+  )
 })
