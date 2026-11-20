@@ -328,7 +328,8 @@ if (process.env.OVERLEAF_LEFT_FOOTER != null) {
   }
 }
 
-if (process.env.OVERLEAF_RIGHT_FOOTER != null) {
+// An unset/empty optional Compose value keeps the upstream default footer.
+if (process.env.OVERLEAF_RIGHT_FOOTER) {
   settings.nav.right_footer = process.env.OVERLEAF_RIGHT_FOOTER
   try {
     settings.nav.right_footer = JSON.parse(process.env.OVERLEAF_RIGHT_FOOTER)
