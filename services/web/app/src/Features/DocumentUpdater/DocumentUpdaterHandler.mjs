@@ -133,20 +133,6 @@ async function setDocument(
   }
 }
 
-/** 横並び編集の条件付き保存。版の比較は document-updater の更新ロック内で行う。 */
-async function setDocumentIfVersion(projectId, docId, userId, lines, version) {
-  return await fetchJson(`${BASE_URL}/project/${projectId}/doc/${docId}`, {
-    method: 'POST',
-    json: {
-      lines,
-      source: 'bilingual-editor',
-      user_id: userId,
-      expected_version: version,
-    },
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  })
-}
-
 async function appendToDocument(
   projectId,
   docId,
@@ -535,7 +521,6 @@ const DocumentUpdaterHandler = {
   getProjectLastUpdatedAt,
   getProjectRanges,
   setDocument,
-  setDocumentIfVersion,
   appendToDocument,
   getProjectDocsIfMatch,
   clearProjectState,

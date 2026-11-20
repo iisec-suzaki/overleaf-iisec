@@ -4,7 +4,6 @@ const { hasAdminAccess } = AdminAuthorizationHelper
 import HttpErrorHandler from '../../../../app/src/Features/Errors/HttpErrorHandler.mjs'
 import SessionManager from '../../../../app/src/Features/Authentication/SessionManager.mjs'
 import { Template } from './models/Template.mjs'
-import { expressify } from '@overleaf/promise-utils'
 
 async function ensureTemplateManagementAccess(req, res, next) {
   const user = SessionManager.getSessionUser(req.session)
@@ -35,6 +34,5 @@ async function ensureTemplateManagementAccess(req, res, next) {
 }
 
 export default {
-  // 不正な ID や DB エラーも Express のエラー処理へ渡し、非同期例外を残さない。
-  ensureTemplateManagementAccess: expressify(ensureTemplateManagementAccess),
+  ensureTemplateManagementAccess,
 }

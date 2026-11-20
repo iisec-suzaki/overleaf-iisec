@@ -1,4 +1,3 @@
-import getMeta from '@/utils/meta'
 import type { DefaultNavbarMetadata } from '@/shared/components/types/default-navbar-metadata'
 import NavDropdownMenu from '@/shared/components/navbar/nav-dropdown-menu'
 import NavDropdownLinkItem from '@/shared/components/navbar/nav-dropdown-link-item'
@@ -39,7 +38,12 @@ export default function AdminMenu({
       {canDisplayAdminMenu ? (
         <>
           <NavDropdownLinkItem href="/admin">Manage Site</NavDropdownLinkItem>
-          {getMeta('ol-ExposedSettings').llmEnabled && <NavDropdownLinkItem href="/admin/llm/settings">Manage Site LLM</NavDropdownLinkItem>}
+          {/* overleaf-lab: explicit Admin dropdown entry for the site LLM
+              settings (reviewer follow-up: users expected the menu item; the
+              /admin "LLM Configuration" tab remains as well). */}
+          <NavDropdownLinkItem href="/admin/llm/settings">
+            Manage Site LLM
+          </NavDropdownLinkItem>
           <NavDropdownLinkItem href="/admin/user">
             Manage Users
           </NavDropdownLinkItem>

@@ -8,6 +8,8 @@ export default /** @type {const} */ ([
   'archive',
   'add_moderator',
   'arrow_back_ios_new',
+  // 横並びパネルのツールバー移動ボタン（右横へ移す）用。
+  'arrow_forward_ios',
   'arrow_circle_up',
   'auto_delete',
   'autorenew',
@@ -80,6 +82,8 @@ export default /** @type {const} */ ([
   'text_snippet',
   'thumb_down',
   'thumb_up',
+  // 英語翻訳レールタブ用の翻訳アイコン（フォントスライス再生成済み）。
+  'translate',
   'transform',
   'tune',
   'turn_left',

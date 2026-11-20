@@ -8,40 +8,21 @@ Use the exact project-relative file path provided in the context. oldText must b
 The latest live editor excerpt overrides older stored source for the same passage. Restrict edits to text actually supplied. Other code examples may use ordinary latex fences.`
 
 export function buildEditorContext(value) {
-  if (
-    !value ||
-    typeof value.file !== 'string' ||
-    !value.file ||
-    value.file.length > 1000 ||
-    typeof value.text !== 'string' ||
-    !value.text ||
-    value.text.length > 20000 ||
-    !Number.isSafeInteger(value.from) ||
-    value.from < 0
-  )
-    return null
-  return JSON.stringify({
-    file: value.file,
-    text: value.text,
-    from: value.from,
-    selection:
-      typeof value.selection === 'string' ? value.selection.slice(0, 8000) : '',
-    truncated: value.truncated !== false,
-  })
+    if (!value || typeof value.file !== 'string' || !value.file || value.file.length > 1000 ||
+        typeof value.text !== 'string' || !value.text || value.text.length > 20000 ||
+        !Number.isSafeInteger(value.from) || value.from < 0) return null
+    return JSON.stringify({
+        file: value.file,
+        text: value.text,
+        from: value.from,
+        selection: typeof value.selection === 'string' ? value.selection.slice(0, 8000) : '',
+        truncated: value.truncated !== false,
+    })
 }
 
 export function validChatMessages(messages) {
-  return (
-    Array.isArray(messages) &&
-    messages.length > 0 &&
-    messages.length <= 100 &&
-    messages.every(
-      m =>
-        m &&
-        ['user', 'assistant', 'system'].includes(m.role) &&
-        typeof m.content === 'string' &&
-        m.content.length <= 100000
-    ) &&
-    messages.reduce((n, m) => n + m.content.length, 0) <= 250000
-  )
+    return Array.isArray(messages) && messages.length > 0 && messages.length <= 100 &&
+        messages.every(m => m && ['user', 'assistant', 'system'].includes(m.role) &&
+            typeof m.content === 'string' && m.content.length <= 100000) &&
+        messages.reduce((n, m) => n + m.content.length, 0) <= 250000
 }

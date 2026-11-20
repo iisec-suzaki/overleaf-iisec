@@ -81,13 +81,11 @@ function refreshLinkedFile(
     _compileAndGetFileStream(
       linkedFileData,
       userId,
-      (err, readStream, newBuildId, newClsiServerId) => {
+      (err, readStream, newBuildId) => {
         if (err) {
           return callback(err)
         }
         linkedFileData.build_id = newBuildId
-        // 新しい PDF を取得したサーバーと版番号を、同じ組で保存する。
-        linkedFileData.clsiServerId = newClsiServerId
         LinkedFilesHandler.importFromStream(
           projectId,
           readStream,
@@ -215,7 +213,7 @@ function _compileAndGetFileStream(linkedFileData, userId, callback) {
             if (err) {
               return callback(err)
             }
-            callback(null, readStream, buildId, clsiServerId)
+            callback(null, readStream, buildId)
           }
         )
       }

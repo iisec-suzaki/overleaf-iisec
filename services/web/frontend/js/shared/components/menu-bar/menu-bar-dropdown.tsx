@@ -3,7 +3,7 @@ import {
   OLDropdownMenu,
   OLDropdownToggle,
 } from '@/shared/components/ol/ol-dropdown-menu'
-import { FC, forwardRef, useCallback, useEffect, useRef } from 'react'
+import { FC, ReactNode, forwardRef, useCallback, useEffect, useRef } from 'react'
 import classNames from 'classnames'
 import { useNestableDropdown } from '@/shared/hooks/use-nestable-dropdown'
 import { NestableDropdownContextProvider } from '@/shared/context/nestable-dropdown-context'
@@ -103,7 +103,7 @@ const NestedDropdownToggle = forwardRef<HTMLAnchorElement, AnchorProps>(
 export const NestedMenuBarDropdown: FC<
   React.PropsWithChildren<{
     id: string
-    title: string
+    title: string | ReactNode
     drop?: 'start' | 'end'
   }>
 > = ({ children, id, title, drop = 'end' }) => {

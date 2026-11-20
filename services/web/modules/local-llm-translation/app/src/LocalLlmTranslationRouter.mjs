@@ -7,132 +7,93 @@
  * 内部ネットワークの翻訳サービスへ中継します（LLM の API キーは中継先のみが知ります）。
  */
 
-import AuthenticationController from "../../../../app/src/Features/Authentication/AuthenticationController.mjs";
-import AuthorizationMiddleware from "../../../../app/src/Features/Authorization/AuthorizationMiddleware.mjs";
-import LocalLlmTranslationController from "./LocalLlmTranslationController.mjs";
-import { RateLimiter } from "../../../../app/src/infrastructure/RateLimiter.mjs";
-import RateLimiterMiddleware from "../../../../app/src/Features/Security/RateLimiterMiddleware.mjs";
+import AuthenticationController from '../../../../app/src/Features/Authentication/AuthenticationController.mjs'
+import AuthorizationMiddleware from '../../../../app/src/Features/Authorization/AuthorizationMiddleware.mjs'
+import LocalLlmTranslationController from './LocalLlmTranslationController.mjs'
+import { RateLimiter } from '../../../../app/src/infrastructure/RateLimiter.mjs'
+import RateLimiterMiddleware from '../../../../app/src/Features/Security/RateLimiterMiddleware.mjs'
 
 // 翻訳は LLM を消費する処理なので、ユーザー行動全体と翻訳単位の両方で制限します。
-const translateLimiter = new RateLimiter("local-llm-translation", {
+const translateLimiter = new RateLimiter('local-llm-translation', {
   points: 40,
   duration: 10 * 60,
-});
+})
 
 export default {
   apply(webRouter) {
     // 利用可能な LLM モデル一覧（翻訳パネルの選択欄用）。ログイン必須。
     webRouter.get(
-      "/local-llm/models",
+      '/local-llm/models',
       AuthenticationController.requireLogin(),
-      RateLimiterMiddleware.rateLimit(translateLimiter),
-      LocalLlmTranslationController.getModels,
-    );
+      RateLimiterMiddleware.rateLimit(translateLimiter, { ipOnly: true }),
+      LocalLlmTranslationController.getModels
+    )
 
-    // 接続先は研究室で共有します。参照はログイン利用者、変更はサイト管理者だけです。
-    webRouter.get(
-      "/local-llm/endpoints",
-      AuthenticationController.requireLogin(),
-      RateLimiterMiddleware.rateLimit(translateLimiter),
-      LocalLlmTranslationController.getEndpoints,
-    );
-    for (const [method, path, handler] of [
-      [
-        "post",
-        "/local-llm/endpoints",
-        LocalLlmTranslationController.createEndpoint,
-      ],
-      [
-        "post",
-        "/local-llm/endpoints/test",
-        LocalLlmTranslationController.testEndpoint,
-      ],
-      [
-        "post",
-        "/local-llm/endpoints/default/clear",
-        LocalLlmTranslationController.clearEndpointDefault,
-      ],
-      [
-        "put",
-        "/local-llm/endpoints/:Endpoint_id",
-        LocalLlmTranslationController.updateEndpoint,
-      ],
-      [
-        "delete",
-        "/local-llm/endpoints/:Endpoint_id",
-        LocalLlmTranslationController.deleteEndpoint,
-      ],
-      [
-        "post",
-        "/local-llm/endpoints/:Endpoint_id/default",
-        LocalLlmTranslationController.setEndpointDefault,
-      ],
-    ]) {
-      webRouter[method](
-        path,
-        AuthenticationController.requireLogin(),
-        LocalLlmTranslationController.requireSiteAdmin,
-        RateLimiterMiddleware.rateLimit(translateLimiter),
-        handler,
-      );
-    }
+    // LLM 接続先設定・翻訳エンドポイント CRUD の route 群は廃止済み（Phase 2）。
+    // 接続先の選び場所は LLM 設定画面（/user/llm-settings の翻訳専用欄 +
+    // /user/llm-providers）へ集約し、翻訳パネルには接続系 UI を置きません。
+    // 翻訳サービス側のエンドポイント/.env は「標準設定に従う」場合の
+    // フォールバックとしてサーバー内部に残ります。
 
     // プロジェクトの翻訳設定（用語集・モデル・文体メモ）の読み込み。
     // プロジェクトの読み取り権限が必要です。
     webRouter.get(
-      "/project/:Project_id/local-llm/settings",
+      '/project/:Project_id/local-llm/settings',
       AuthenticationController.requireLogin(),
       AuthorizationMiddleware.blockRestrictedUserFromProject,
       AuthorizationMiddleware.ensureUserCanReadProject,
-      LocalLlmTranslationController.getSettings,
-    );
+      LocalLlmTranslationController.getSettings
+    )
 
     // 翻訳設定の保存。プロジェクト本文の書き込み権限が必要です。
     webRouter.put(
-      "/project/:Project_id/local-llm/settings",
+      '/project/:Project_id/local-llm/settings',
       AuthenticationController.requireLogin(),
       AuthorizationMiddleware.blockRestrictedUserFromProject,
       AuthorizationMiddleware.ensureUserCanWriteProjectContent,
-      LocalLlmTranslationController.putSettings,
-    );
+      LocalLlmTranslationController.putSettings
+    )
 
-    // 翻訳では設定保存・選択範囲への適用も行うため、本文の書き込み権限を要します。
+    // 翻訳本体の開始（SSE ストリーム）。プロジェクトの読み取り権限があれば開始でき、
+    // 結果の保存は別の書き込み権限チェックを要します。
     webRouter.post(
-      "/project/:Project_id/local-llm/translate",
+      '/project/:Project_id/local-llm/translate',
       AuthenticationController.requireLogin(),
       AuthorizationMiddleware.blockRestrictedUserFromProject,
-      // 翻訳の実行自体は原文を読むだけ。保存（.en.tex 等）は write 側の
-      // ルートが別途守るため、閲覧権限だけで翻訳を開始できる（fork 準拠）。
       AuthorizationMiddleware.ensureUserCanReadProject,
       RateLimiterMiddleware.rateLimit(translateLimiter, {
-        params: ["Project_id"],
+        params: ['Project_id'],
       }),
-      LocalLlmTranslationController.translate,
-    );
-
-    // 横並び側の読み書きも、既存のプロジェクト権限・CSRF の対象とする。
-    webRouter.get(
-      "/project/:Project_id/local-llm/doc-content",
-      AuthenticationController.requireLogin(),
-      AuthorizationMiddleware.blockRestrictedUserFromProject,
-      AuthorizationMiddleware.ensureUserCanReadProject,
-      LocalLlmTranslationController.getDocContent,
-    );
-    webRouter.put(
-      "/project/:Project_id/local-llm/doc-content",
-      AuthenticationController.requireLogin(),
-      AuthorizationMiddleware.blockRestrictedUserFromProject,
-      AuthorizationMiddleware.ensureUserCanWriteProjectContent,
-      LocalLlmTranslationController.saveDocContent,
-    );
+      LocalLlmTranslationController.translate
+    )
 
     // 英語版 .en.tex 文書の作成・上書き保存。書き込み権限が必要です。
     webRouter.put(
-      "/project/:Project_id/local-llm/english-document",
+      '/project/:Project_id/local-llm/english-document',
       AuthenticationController.requireLogin(),
       AuthorizationMiddleware.blockRestrictedUserFromProject,
       AuthorizationMiddleware.ensureUserCanWriteProjectContent,
-      LocalLlmTranslationController.saveEnglishDocument,
-    );
+      LocalLlmTranslationController.saveEnglishDocument
+    )
+
+    // （旧 AI アシスタントのプロキシ route 群は廃止済み: チャットは
+    //  llm モジュールの /project/:id/llm/chat に統合されました）
+
+    // --- 日本語/英語横並び表示パネルのファイル読み書き ------------------------
+    // 読み取りは docstore 最新版、保存は通常の編集操作と同じ upsert 経路です。
+    webRouter.get(
+      '/project/:Project_id/local-llm/doc-content',
+      AuthenticationController.requireLogin(),
+      AuthorizationMiddleware.blockRestrictedUserFromProject,
+      AuthorizationMiddleware.ensureUserCanReadProject,
+      LocalLlmTranslationController.getDocContent
+    )
+    webRouter.put(
+      '/project/:Project_id/local-llm/doc-content',
+      AuthenticationController.requireLogin(),
+      AuthorizationMiddleware.blockRestrictedUserFromProject,
+      AuthorizationMiddleware.ensureUserCanWriteProjectContent,
+      LocalLlmTranslationController.saveDocContent
+    )
   },
-};
+}

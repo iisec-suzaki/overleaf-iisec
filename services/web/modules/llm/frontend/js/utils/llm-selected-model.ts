@@ -14,32 +14,32 @@ const PROJECT_PREFIX = 'llm.chat.selectedModel.'
 const GLOBAL_KEY = 'llm.chat.selectedModel'
 
 function storageKey(projectId?: string): string {
-  return projectId ? PROJECT_PREFIX + projectId : GLOBAL_KEY
+    return projectId ? PROJECT_PREFIX + projectId : GLOBAL_KEY
 }
 
 export function readSelectedModel(projectId?: string): string {
-  try {
-    if (projectId) {
-      const scoped = customLocalStorage.getItem(PROJECT_PREFIX + projectId)
-      if (scoped) {
-        return scoped
-      }
+    try {
+        if (projectId) {
+            const scoped = customLocalStorage.getItem(PROJECT_PREFIX + projectId)
+            if (scoped) {
+                return scoped
+            }
+        }
+        return customLocalStorage.getItem(GLOBAL_KEY) || ''
+    } catch {
+        return '' // storage disabled / private mode: fall back to server default
     }
-    return customLocalStorage.getItem(GLOBAL_KEY) || ''
-  } catch {
-    return '' // storage disabled / private mode: fall back to server default
-  }
 }
 
 export function writeSelectedModel(modelId: string, projectId?: string): void {
-  try {
-    if (modelId) {
-      customLocalStorage.setItem(storageKey(projectId), modelId)
-    } else {
-      customLocalStorage.removeItem(storageKey(projectId))
-      customLocalStorage.removeItem(GLOBAL_KEY)
+    try {
+        if (modelId) {
+            customLocalStorage.setItem(storageKey(projectId), modelId)
+        } else {
+            customLocalStorage.removeItem(storageKey(projectId))
+            customLocalStorage.removeItem(GLOBAL_KEY)
+        }
+    } catch {
+        // ignore: storage disabled / private mode
     }
-  } catch {
-    // ignore: storage disabled / private mode
-  }
 }

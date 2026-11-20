@@ -25,9 +25,13 @@ export type RailTabKey =
   | 'full-project-search'
   | 'dimensions'
   | 'workbench'
-  | 'llm-chat'
+  // 追加（local-llm-translation モジュール）: 英語翻訳・横並び表示の
+  // 左レールタブ。railEntries から登録する独自タブのキーです。
+  // （AI アシスタントタブは llm モジュールの 'llm-chat' に統合し廃止済み）
   | 'translation'
   | 'split-view'
+  // 追加（llm モジュール由来）: クラウド版相当の LLM チャットレールタブ。
+  | 'llm-chat'
 
 export type RailModalKey =
   | 'keyboard-shortcuts'

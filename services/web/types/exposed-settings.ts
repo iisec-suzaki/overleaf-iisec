@@ -5,8 +5,6 @@ type TemplateLink = {
 }
 
 export type ExposedSettings = {
-  llmEnabled: boolean
-  llmAllowUserSettings: boolean
   adminEmail: string
   appName: string
   cookieDomain: string
@@ -59,4 +57,5 @@ export type ExposedSettings = {
   githubSyncEnabled: boolean
   zoteroEnabled: boolean
   enablePandocConversions: boolean
+  llmAllowUserSettings?: boolean
 }

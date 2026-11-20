@@ -1,18 +1,15 @@
-import { useEditorOpenDocContext } from '@/features/ide-react/context/editor-open-doc-context'
-import { useCodeMirrorViewContext } from '@/features/source-editor/components/codemirror-context'
 // LLM Floating Toolbar for CodeMirror Editor
 // Adapted from lcpu-club/overleaf — provides selection-based AI actions
 // (paraphrase, style change, summarize, explain, etc.)
 
 import React, {
-  forwardRef,
-  useEffect,
-  useImperativeHandle,
-  useMemo,
-  useRef,
-  useState,
+    forwardRef,
+    useEffect,
+    useImperativeHandle,
+    useMemo,
+    useRef,
+    useState,
 } from 'react'
-import { usePermissionsContext } from '@/features/ide-react/context/permissions-context'
 import { EditorView } from '@codemirror/view'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -25,42 +22,39 @@ import { useLLMPrompts } from '../hooks/use-llm-prompts'
 import { watchEditorTheme } from '../utils/llm-editor-theme'
 
 export type LLMToolbarHandle = {
-  show: (
-    view: EditorView,
-    selection?: { text: string; range: { from: number; to: number } } | null
-  ) => void
-  hide: () => void
-  openMenu: () => void
-  getSelectedText: () => string
+    show: (view: EditorView) => void
+    hide: () => void
+    openMenu: () => void
+    getSelectedText: () => string
 }
 
 type ParaphraseKind =
-  | 'paraphrase'
-  | 'style'
-  | 'mathfix'
-  | 'summarize'
-  | 'explain'
-  | 'translate'
-  | 'synonyms'
-  | 'checkCitations'
-  | 'title'
-  | 'abstract'
-  | 'keywords'
-  | 'chat'
+    | 'paraphrase'
+    | 'style'
+    | 'mathfix'
+    | 'summarize'
+    | 'explain'
+    | 'translate'
+    | 'synonyms'
+    | 'checkCitations'
+    | 'title'
+    | 'abstract'
+    | 'keywords'
+    | 'chat'
 
 const kindTitleMap: Record<ParaphraseKind, string> = {
-  paraphrase: 'Paraphrase',
-  style: 'Change Style',
-  summarize: 'Summarize',
-  explain: 'Explain',
-  mathfix: 'Fix formula syntax',
-  translate: 'Translate',
-  synonyms: 'Synonyms',
-  checkCitations: 'Check citations',
-  title: 'Title Generator',
-  abstract: 'Abstract Generator',
-  keywords: 'Keyword Generator',
-  chat: 'AI Response',
+    paraphrase: 'Paraphrase',
+    style: 'Change Style',
+    summarize: 'Summarize',
+    explain: 'Explain',
+    mathfix: 'Fix formula syntax',
+    translate: 'Translate',
+    synonyms: 'Synonyms',
+    checkCitations: 'Check citations',
+    title: 'Title Generator',
+    abstract: 'Abstract Generator',
+    keywords: 'Keyword Generator',
+    chat: 'AI Response',
 }
 
 // overleaf-lab (2026-08, reference-synced): the context menu is now CONTEXT-
@@ -69,139 +63,117 @@ const kindTitleMap: Record<ParaphraseKind, string> = {
 // Synonyms / Check citations); without a selection → the whole-document
 // generators (Title / Abstract / Keywords).
 const TRANSLATE_LANGUAGES: string[] = [
-  'Albanian',
-  'Arabic',
-  'Bulgarian',
-  'Chinese (Simplified)',
-  'Chinese (Traditional)',
-  'Czech',
-  'Dutch',
-  'English',
-  'Filipino',
-  'French',
-  'German',
-  'Greek',
-  'Hebrew',
-  'Hindi',
-  'Hungarian',
-  'Indonesian',
-  'Italian',
-  'Japanese',
-  'Korean',
-  'Malay',
-  'Persian (Farsi)',
-  'Polish',
-  'Portuguese',
-  'Romanian',
-  'Russian',
-  'Serbian',
-  'Spanish',
-  'Swedish',
-  'Turkish',
-  'Ukrainian',
-  'Vietnamese',
+    'Albanian',
+    'Arabic',
+    'Bulgarian',
+    'Chinese (Simplified)',
+    'Chinese (Traditional)',
+    'Czech',
+    'Dutch',
+    'English',
+    'Filipino',
+    'French',
+    'German',
+    'Greek',
+    'Hebrew',
+    'Hindi',
+    'Hungarian',
+    'Indonesian',
+    'Italian',
+    'Japanese',
+    'Korean',
+    'Malay',
+    'Persian (Farsi)',
+    'Polish',
+    'Portuguese',
+    'Romanian',
+    'Russian',
+    'Serbian',
+    'Spanish',
+    'Swedish',
+    'Turkish',
+    'Ukrainian',
+    'Vietnamese',
 ]
 
 const askAiMenuKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
-  if (e.key === 'Enter' || e.key === ' ') {
-    e.preventDefault()
-    e.currentTarget.click()
-  }
+    if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        e.currentTarget.click()
+    }
 }
 
 const AskAiMenuItem = ({
-  icon,
-  label,
-  onClick,
+    icon,
+    label,
+    onClick,
 }: {
-  icon?: string
-  label: string
-  onClick: () => void
+    icon?: string
+    label: string
+    onClick: () => void
 }) => (
-  <div
-    className="llm-item"
-    onClick={onClick}
-    role="menuitem"
-    tabIndex={0}
-    onKeyDown={askAiMenuKeyDown}
-  >
-    <span
-      aria-hidden="true"
-      className={icon ? undefined : 'llm-item-icon-spacer'}
+    <div
+        className="llm-item"
+        onClick={onClick}
+        role="menuitem"
+        tabIndex={0}
+        onKeyDown={askAiMenuKeyDown}
     >
-      {icon ? <MaterialIcon type={icon} /> : null}
-    </span>
-    {label}
-  </div>
+        <span aria-hidden="true" className={icon ? undefined : 'llm-item-icon-spacer'}>
+            {icon ? <MaterialIcon type={icon} /> : null}
+        </span>
+        {label}
+    </div>
 )
 
 function escapeHtml(s: string) {
-  return s.replace(
-    /[&<>"']/g,
-    c =>
-      ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#39;',
-      })[c] || c
-  )
+    return s.replace(
+        /[&<>"']/g,
+        c =>
+        ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+        }[c] || c)
+    )
 }
 
 function base64EncodeUnicode(str: string) {
-  try {
-    return btoa(unescape(encodeURIComponent(str)))
-  } catch {
-    return btoa(str)
-  }
+    try {
+        return btoa(unescape(encodeURIComponent(str)))
+    } catch {
+        return btoa(str)
+    }
 }
 
 function base64DecodeUnicode(b64: string) {
-  try {
-    return decodeURIComponent(escape(atob(b64)))
-  } catch {
-    return atob(b64)
-  }
+    try {
+        return decodeURIComponent(escape(atob(b64)))
+    } catch {
+        return atob(b64)
+    }
 }
 
 const Spinner = () => (
-  <div
-    style={{
-      width: 16,
-      height: 16,
-      borderRadius: 8,
-      border: '2px solid rgba(255,255,255,0.12)',
-      borderTopColor: 'rgba(255,255,255,0.7)',
-      animation: 'llm-spin 0.9s linear infinite',
-    }}
-  />
+    <div
+        style={{
+            width: 16,
+            height: 16,
+            borderRadius: 8,
+            border: '2px solid rgba(255,255,255,0.12)',
+            borderTopColor: 'rgba(255,255,255,0.7)',
+            animation: 'llm-spin 0.9s linear infinite',
+        }}
+    />
 )
 
-const LLMToolbar = forwardRef<LLMToolbarHandle, Record<string, never>>(
-  (_, ref) => {
+const LLMToolbar = forwardRef<LLMToolbarHandle, Record<string, never>>((_, ref) => {
     // overleaf-lab: the floating "Ask AI" selection toolbar is part of the chat
     // feature, so it obeys the super-admin chat flag. Called unconditionally to
     // respect the rules of hooks; the returned JSX is gated further down.
     const features = useLLMFeatures()
-    const currentEditorView = useCodeMirrorViewContext()
-    const { currentDocumentId } = useEditorOpenDocContext()
-    const { trackedWrite } = usePermissionsContext()
-    const sourceAtRequest = useRef<{
-      view: EditorView
-      document: string
-      documentId: string | null
-    } | null>(null)
-    const [applyError, setApplyError] = useState('')
-    const canApplyTo = (view: EditorView) =>
-      trackedWrite &&
-      view === currentEditorView &&
-      !view.destroyed &&
-      !view.state.readOnly &&
-      view.state.facet(EditorView.editable) &&
-      sourceAtRequest.current?.view === view &&
-      sourceAtRequest.current.documentId === currentDocumentId &&
-      sourceAtRequest.current.document === view.state.doc.toString()
     // overleaf-lab: admin-editable prompts. Called unconditionally at the top so
     // the rules of hooks hold. `prompts` is read directly inside postToAPI (a
     // closure recreated each render), falling back to the hardcoded strings when
@@ -211,7 +183,7 @@ const LLMToolbar = forwardRef<LLMToolbarHandle, Record<string, never>>(
     const [panelRect, setPanelRect] = useState({ top: 0, left: 0, width: 520 })
     const [anchorPos, setAnchorPos] = useState({ top: 0, left: 0 })
     const [panelMode, setPanelMode] = useState<
-      'hidden' | 'menu' | 'chat' | 'paraphrase'
+        'hidden' | 'menu' | 'chat' | 'paraphrase'
     >('hidden')
     // overleaf-lab (owner feedback): the Translate language list is an INLINE
     // accordion inside the menu with a search filter — the old hover fly-out
@@ -225,15 +197,15 @@ const LLMToolbar = forwardRef<LLMToolbarHandle, Record<string, never>>(
     // overleaf-lab (owner request 2026-08-25): this floating overlay follows
     // the EDITOR theme like the rail panel does.
     useEffect(() => {
-      const watcher = watchEditorTheme([wrapRef.current])
-      return () => watcher.stop()
+        const watcher = watchEditorTheme([wrapRef.current])
+        return () => watcher.stop()
     }, [])
 
     const [query, setQuery] = useState('')
     const [selectionText, setSelectionText] = useState('')
     const [selectionRange, setSelectionRange] = useState<{
-      from: number
-      to: number
+        from: number
+        to: number
     } | null>(null)
     const [result, setResult] = useState('')
     const [loading, setLoading] = useState(false)
@@ -245,440 +217,379 @@ const LLMToolbar = forwardRef<LLMToolbarHandle, Record<string, never>>(
     // overleaf-lab: the imperative API (show/openMenu) captured each render so
     // the editor toolbar "Ask AI" button can open the context menu via event.
     const apiRef = useRef<{
-      show: (
-        view: EditorView,
-        selection?: { text: string; range: { from: number; to: number } } | null
-      ) => void
-      openMenu: () => void
-      hide: () => void
-      getSelectedText: () => string
+        show: (view: EditorView) => void
+        openMenu: () => void
+        hide: () => void
+        getSelectedText: () => string
     } | null>(null)
     const wrapRef = useRef<HTMLDivElement | null>(null)
     const panelRef = useRef<HTMLDivElement | null>(null)
     const inputRef = useRef<HTMLTextAreaElement | null>(null)
     const editRef = useRef<HTMLTextAreaElement | null>(null)
 
-    const postToAPI = async (
-      mode: number,
-      ask: string,
-      vars?: Record<string, string>
-    ) => {
-      const projectId = getMeta('ol-project_id')
+    const postToAPI = async (mode: number, ask: string, vars?: Record<string, string>) => {
+        const projectId = getMeta('ol-project_id')
 
-      // overleaf-lab: PR item 13 — title/abstract are document-level generators:
-      // feed the whole current file (the toolbar's editor doc) instead of the
-      // selection, keeping the selection as a fallback when the doc is empty.
-      const wholeFileText = viewRef.current?.state?.doc?.toString?.() || ''
-      const basisText =
-        (mode === 9 || mode === 10) && wholeFileText
-          ? wholeFileText
-          : selectionText
+        // overleaf-lab: PR item 13 — title/abstract are document-level generators:
+        // feed the whole current file (the toolbar's editor doc) instead of the
+        // selection, keeping the selection as a fallback when the doc is empty.
+        const wholeFileText = viewRef.current?.state?.doc?.toString?.() || ''
+        const basisText =
+            (mode === 9 || mode === 10) && wholeFileText ? wholeFileText : selectionText
 
-      // Build a prompt based on the mode
-      const modePrompts: Record<number, string> = {
-        0: ask, // free-form chat
-        1: `Paraphrase the following LaTeX text. Keep every LaTeX command, math, and citation key intact. Output only the paraphrased text, with no preamble, no explanation, and no code fences.\n\n${basisText}`,
-        2: `Rewrite the following LaTeX text in a fluent, formal academic style, keeping the text's own language. Preserve every LaTeX command, math, and citation key. Output only the rewritten text, with no preamble and no code fences.\n\n${basisText}`,
-        3: `Rewrite the following LaTeX text more concisely, preserving its meaning and every LaTeX command, math, and citation. Output only the rewritten text, nothing else.\n\n${basisText}`,
-        4: `Rewrite the following LaTeX text in a punchier, more engaging style while keeping it accurate. Preserve every LaTeX command, math, and citation. Output only the rewritten text, nothing else.\n\n${basisText}`,
-        5: `Split the following LaTeX paragraph into several shorter, well-structured paragraphs. Keep the wording and all LaTeX; only add paragraph breaks. Output only the resulting LaTeX, nothing else.\n\n${basisText}`,
-        6: `Join the following LaTeX paragraphs into a single cohesive paragraph, preserving every LaTeX command, math, and citation. Output only the resulting paragraph, nothing else.\n\n${basisText}`,
-        7: `Summarize the following LaTeX text concisely. Output only the summary as plain LaTeX, with no preamble and no code fences.\n\n${basisText}`,
-        8: `Explain the following LaTeX text clearly and concisely for the author:\n\n${basisText}`,
-        9: `Propose one concise, specific academic title for the following content. Output only the title text: no quotes, no label, no trailing period.\n\n${basisText}`,
-        10: `Write a single self-contained academic abstract (about 150 to 250 words) for the following content. Output only the abstract text: no heading, no label, and no code fences.\n\n${basisText}`,
-        11: `Fix ONLY the LaTeX/math syntax problems in the following selection (mismatched braces or delimiters, invalid operators, wrong or missing math environments). Preserve the meaning and wording exactly. Output only the corrected LaTeX, with no preamble, no explanation, and no code fences.\n\n${basisText}`,
-        12: `Translate the following LaTeX text into {{language}}. Keep every LaTeX command, math, and citation key exactly as-is (translate only the natural-language text). Output only the translated text, with no preamble and no code fences.\n\n${basisText}`,
-        13: `Suggest two or three well-chosen academic synonyms or phrasings for each key content word in the following LaTeX text, one per line, in the format "word — alternative(s)". Keep every LaTeX command intact and do not rewrite the whole text. Output only the list, with no preamble and no code fences.\n\n${basisText}`,
-        14: `Check the citations in the following LaTeX selection (\\cite, \\citep, \\citet and similar). Report, only if there is a problem: malformed or suspicious bibliography keys, duplicate keys, or missing keys. If everything looks fine, reply exactly: OK. Keep the answer short and specific.\n\n${basisText}`,
-      }
-
-      // overleaf-lab: numeric transform modes map to admin action keys. Mode 0
-      // is free-form chat and has no template.
-      const modeActionKey: Record<number, string> = {
-        1: 'paraphrase',
-        2: 'academic',
-        3: 'concise',
-        4: 'punchy',
-        5: 'split',
-        6: 'join',
-        7: 'summarize',
-        8: 'explain',
-        9: 'title',
-        10: 'abstract',
-        11: 'mathFix',
-        12: 'translate',
-        13: 'synonyms',
-        14: 'checkCitations',
-      }
-
-      // overleaf-lab: hardcoded system prompt kept verbatim as the fallback
-      // used whenever the admin prompt is absent or the fetch has not resolved.
-      const fallbackSystemPrompt =
-        'You are a LaTeX writing assistant embedded in an editor. Preserve existing LaTeX commands, math, and citation keys exactly, and reply in the same language as the input. When asked to rewrite or transform text, return only the resulting text, with no preamble and no Markdown code fences.'
-
-      // overleaf-lab: prefer the admin system prompt when it is a non-empty
-      // string, otherwise keep the hardcoded one.
-      const systemContent =
-        typeof prompts?.askAiSystemPrompt === 'string' &&
-        prompts.askAiSystemPrompt.trim() !== ''
-          ? prompts.askAiSystemPrompt
-          : fallbackSystemPrompt
-
-      // overleaf-lab: build the user content. Mode 0 stays free-form chat
-      // (uses the user's `ask`). Transform modes prefer the admin template,
-      // substituting the literal {{selection}} with the selected text (or
-      // appending it when the template omits the placeholder), and fall back
-      // to the hardcoded modePrompts entry when no admin template exists.
-      let userContent: string
-      const fillVars = (template: string, base: string) => {
-        let out = template.includes('{{selection}}')
-          ? template.split('{{selection}}').join(base)
-          : template
-        for (const [key, value] of Object.entries(vars || {})) {
-          out = out.split(`{{${key}}}`).join(value)
+        // Build a prompt based on the mode
+        const modePrompts: Record<number, string> = {
+            0: ask, // free-form chat
+            1: `Paraphrase the following LaTeX text. Keep every LaTeX command, math, and citation key intact. Output only the paraphrased text, with no preamble, no explanation, and no code fences.\n\n${basisText}`,
+            2: `Rewrite the following LaTeX text in a fluent, formal academic style, keeping the text's own language. Preserve every LaTeX command, math, and citation key. Output only the rewritten text, with no preamble and no code fences.\n\n${basisText}`,
+            3: `Rewrite the following LaTeX text more concisely, preserving its meaning and every LaTeX command, math, and citation. Output only the rewritten text, nothing else.\n\n${basisText}`,
+            4: `Rewrite the following LaTeX text in a punchier, more engaging style while keeping it accurate. Preserve every LaTeX command, math, and citation. Output only the rewritten text, nothing else.\n\n${basisText}`,
+            5: `Split the following LaTeX paragraph into several shorter, well-structured paragraphs. Keep the wording and all LaTeX; only add paragraph breaks. Output only the resulting LaTeX, nothing else.\n\n${basisText}`,
+            6: `Join the following LaTeX paragraphs into a single cohesive paragraph, preserving every LaTeX command, math, and citation. Output only the resulting paragraph, nothing else.\n\n${basisText}`,
+            7: `Summarize the following LaTeX text concisely. Output only the summary as plain LaTeX, with no preamble and no code fences.\n\n${basisText}`,
+            8: `Explain the following LaTeX text clearly and concisely for the author:\n\n${basisText}`,
+            9: `Propose one concise, specific academic title for the following content. Output only the title text: no quotes, no label, no trailing period.\n\n${basisText}`,
+            10: `Write a single self-contained academic abstract (about 150 to 250 words) for the following content. Output only the abstract text: no heading, no label, and no code fences.\n\n${basisText}`,
+            11: `Fix ONLY the LaTeX/math syntax problems in the following selection (mismatched braces or delimiters, invalid operators, wrong or missing math environments). Preserve the meaning and wording exactly. Output only the corrected LaTeX, with no preamble, no explanation, and no code fences.\n\n${basisText}`,
+            12: `Translate the following LaTeX text into {{language}}. Keep every LaTeX command, math, and citation key exactly as-is (translate only the natural-language text). Output only the translated text, with no preamble and no code fences.\n\n${basisText}`,
+            13: `Suggest two or three well-chosen academic synonyms or phrasings for each key content word in the following LaTeX text, one per line, in the format "word — alternative(s)". Keep every LaTeX command intact and do not rewrite the whole text. Output only the list, with no preamble and no code fences.\n\n${basisText}`,
+            14: `Check the citations in the following LaTeX selection (\\cite, \\citep, \\citet and similar). Report, only if there is a problem: malformed or suspicious bibliography keys, duplicate keys, or missing keys. If everything looks fine, reply exactly: OK. Keep the answer short and specific.\n\n${basisText}`,
         }
-        return out
-      }
-      // overleaf-lab (owner report 2026-08-28): small models drift to the
-      // instruction or conversation language (observed: Italian rephrasing of
-      // an English selection even though the system prompt says otherwise —
-      // see the language lock appended INSIDE each per-action message below).
-      if (mode >= 1) {
-        const actionKey = modeActionKey[mode]
-        const template = actionKey
-          ? prompts?.askAiActionPrompts?.[actionKey]
-          : undefined
-        if (typeof template === 'string' && template.trim() !== '') {
-          userContent = template.includes('{{selection}}')
-            ? fillVars(template, basisText)
-            : `${template}\n\n${basisText}`
+
+        // overleaf-lab: numeric transform modes map to admin action keys. Mode 0
+        // is free-form chat and has no template.
+        const modeActionKey: Record<number, string> = {
+            1: 'paraphrase',
+            2: 'academic',
+            3: 'concise',
+            4: 'punchy',
+            5: 'split',
+            6: 'join',
+            7: 'summarize',
+            8: 'explain',
+            9: 'title',
+            10: 'abstract',
+            11: 'mathFix',
+            12: 'translate',
+            13: 'synonyms',
+            14: 'checkCitations',
+        }
+
+        // overleaf-lab: hardcoded system prompt kept verbatim as the fallback
+        // used whenever the admin prompt is absent or the fetch has not resolved.
+        const fallbackSystemPrompt =
+            'You are a LaTeX writing assistant embedded in an editor. Preserve existing LaTeX commands, math, and citation keys exactly, and reply in the same language as the input. When asked to rewrite or transform text, return only the resulting text, with no preamble and no Markdown code fences.'
+
+        // overleaf-lab: prefer the admin system prompt when it is a non-empty
+        // string, otherwise keep the hardcoded one.
+        const systemContent =
+            typeof prompts?.askAiSystemPrompt === 'string' &&
+                prompts.askAiSystemPrompt.trim() !== ''
+                ? prompts.askAiSystemPrompt
+                : fallbackSystemPrompt
+
+        // overleaf-lab: build the user content. Mode 0 stays free-form chat
+        // (uses the user's `ask`). Transform modes prefer the admin template,
+        // substituting the literal {{selection}} with the selected text (or
+        // appending it when the template omits the placeholder), and fall back
+        // to the hardcoded modePrompts entry when no admin template exists.
+        let userContent: string
+        const fillVars = (template: string, base: string) => {
+            let out = template.includes('{{selection}}')
+                ? template.split('{{selection}}').join(base)
+                : template
+            for (const [key, value] of Object.entries(vars || {})) {
+                out = out.split(`{{${key}}}`).join(value)
+            }
+            return out
+        }
+        // overleaf-lab (owner report 2026-08-28): small models drift to the
+        // instruction or conversation language (observed: Italian rephrasing of
+        // an English selection even though the system prompt says otherwise —
+        // see the language lock appended INSIDE each per-action message below).
+        if (mode >= 1) {
+            const actionKey = modeActionKey[mode]
+            const template = actionKey
+                ? prompts?.askAiActionPrompts?.[actionKey]
+                : undefined
+            if (typeof template === 'string' && template.trim() !== '') {
+                userContent = template.includes('{{selection}}')
+                    ? fillVars(template, basisText)
+                    : `${template}\n\n${basisText}`
+            } else {
+                userContent = fillVars(modePrompts[mode] || ask, basisText)
+            }
+            // overleaf-lab (owner rule 2026-08-28): the language rule must ride
+            // in the per-action message itself; only Translate (mode 12) may
+            // change the language, so the lock is appended to every other action.
+            if (mode !== 12) {
+                userContent +=
+                    '\n\nIMPORTANT - language: produce the output in EXACTLY the same language as the text provided above. ' +
+                    'Do not translate it and do not switch to any other language; only the Translate action is allowed to change the language.'
+            }
         } else {
-          userContent = fillVars(modePrompts[mode] || ask, basisText)
+            // overleaf-lab: PR item 10 — when the user asks while a passage is
+            // selected, anchor the request to that passage (with its line range
+            // when resolvable) so the reply can refer back to it, Overleaf-style.
+            if (selectionText) {
+                userContent = `<selected-text${selectionRef ? ` lines="${selectionRef}"` : ''}>\n${selectionText}\n</selected-text>\n\n${ask}`
+            } else {
+                userContent = modePrompts[mode] || ask
+            }
         }
-        // overleaf-lab (owner rule 2026-08-28): the language rule must ride
-        // in the per-action message itself; only Translate (mode 12) may
-        // change the language, so the lock is appended to every other action.
-        if (mode !== 12) {
-          userContent +=
-            '\n\nIMPORTANT - language: produce the output in EXACTLY the same language as the text provided above. ' +
-            'Do not translate it and do not switch to any other language; only the Translate action is allowed to change the language.'
-        }
-      } else {
-        // overleaf-lab: PR item 10 — when the user asks while a passage is
-        // selected, anchor the request to that passage (with its line range
-        // when resolvable) so the reply can refer back to it, Overleaf-style.
-        if (selectionText) {
-          userContent = `<selected-text${selectionRef ? ` lines="${selectionRef}"` : ''}>\n${selectionText}\n</selected-text>\n\n${ask}`
-        } else {
-          userContent = modePrompts[mode] || ask
-        }
-      }
 
-      const messages = [
-        {
-          role: 'system',
-          content: systemContent,
-        },
-        {
-          role: 'user',
-          content: userContent,
-        },
-      ]
+        const messages = [
+            {
+                role: 'system',
+                content: systemContent,
+            },
+            {
+                role: 'user',
+                content: userContent,
+            },
+        ]
 
-      // overleaf-lab (owner decision 2026-08-26): the request carries NO
-      // explicit model — the backend resolves the user's profile selection
-      // (File → "Select LLM Model") itself, so every surface always runs on
-      // exactly the user's chosen model (no stale local bridge values).
-      try {
-        const json = await postJSON('/project/' + projectId + '/llm/chat', {
-          // surface='ask': Ask AI からの送信であることを伝え、サーバー側で
-          // 「Ask AI」用の機能別 AI 選択（LLM 設定画面）を当てます。
-          body: { messages, surface: 'ask' },
-        })
-        if (json && typeof json.content === 'string') {
-          return json.content
+        // overleaf-lab (owner decision 2026-08-26): the request carries NO
+        // explicit model — the backend resolves the user's profile selection
+        // (File → "Select LLM Model") itself, so every surface always runs on
+        // exactly the user's chosen model (no stale local bridge values).
+        try {
+            const json = await postJSON('/project/' + projectId + '/llm/chat', {
+                // surface='ask': Ask AI からの送信であることを伝え、サーバー側で
+                // 「Ask AI」用の機能別 AI 選択（LLM 設定画面）を当てます。
+                body: { messages, surface: 'ask' },
+            })
+            if (json && typeof json.content === 'string') {
+                return json.content
+            }
+            throw new Error((json && json.message) || 'Unexpected response format')
+        } catch (err: any) {
+            return `Error: ${err?.data?.message || err?.data?.details || err?.message || 'Request failed'}`
         }
-        throw new Error((json && json.message) || 'Unexpected response format')
-      } catch (err: any) {
-        return `Error: ${err?.data?.message || err?.data?.details || err?.message || 'Request failed'}`
-      }
     }
 
     const startFetch = async (
-      mode: number,
-      k: ParaphraseKind,
-      ask?: string,
-      vars?: Record<string, string>
+        mode: number,
+        k: ParaphraseKind,
+        ask?: string,
+        vars?: Record<string, string>
     ) => {
-      setApplyError('')
-      const sourceView = viewRef.current
-      sourceAtRequest.current = sourceView
-        ? {
-            view: sourceView,
-            document: sourceView.state.doc.toString(),
-            documentId: currentDocumentId,
-          }
-        : null
-      setKind(k)
-      setPanelMode(k === 'chat' ? 'chat' : 'paraphrase')
-      setLoading(true)
-      setEditMode(false)
-      setShowDiff(false)
-      setResult('')
+        setKind(k)
+        setPanelMode(k === 'chat' ? 'chat' : 'paraphrase')
+        setLoading(true)
+        setEditMode(false)
+        setShowDiff(false)
+        setResult('')
 
-      const requestedSource = sourceAtRequest.current
-      const resp = await postToAPI(mode, (ask ?? query).trim(), vars)
-      // 別の選択を開いた後に届いた古い回答を、新しい選択の結果として表示しません。
-      if (sourceAtRequest.current !== requestedSource) return
-      setResult(resp)
-      setLoading(false)
+        const resp = await postToAPI(mode, (ask ?? query).trim(), vars)
+        setResult(resp)
+        setLoading(false)
     }
 
     const renderer = useMemo(() => {
-      const r = new marked.Renderer()
-      r.code = (
-        code: string,
-        infostring: string | undefined,
-        _escaped: boolean
-      ) => {
-        const lang = (infostring || '').trim().toLowerCase()
-        const isLatex =
-          lang === 'latex' || lang === 'tex' || code.trim().startsWith('\\')
-        const safeCodeHtml = escapeHtml(code)
-        if (isLatex) {
-          const b64 = base64EncodeUnicode(code)
-          return `<div class="llm-latex-block" style="position:relative;"><button class="llm-copy-latex" data-code="${b64}" title="Copy LaTeX" style="position:absolute;right:8px;top:8px;border-radius:6px;padding:4px 6px;border:none;background:rgba(255,255,255,0.03);color:#e6eef8;cursor:pointer">Copy</button><pre style="margin:0;"><code class="language-${escapeHtml(lang)}">${safeCodeHtml}</code></pre></div>`
+        const r = new marked.Renderer()
+        r.code = (
+            code: string,
+            infostring: string | undefined,
+            _escaped: boolean
+        ) => {
+            const lang = (infostring || '').trim().toLowerCase()
+            const isLatex =
+                lang === 'latex' ||
+                lang === 'tex' ||
+                code.trim().startsWith('\\')
+            const safeCodeHtml = escapeHtml(code)
+            if (isLatex) {
+                const b64 = base64EncodeUnicode(code)
+                return `<div class="llm-latex-block" style="position:relative;"><button class="llm-copy-latex" data-code="${b64}" title="Copy LaTeX" style="position:absolute;right:8px;top:8px;border-radius:6px;padding:4px 6px;border:none;background:rgba(255,255,255,0.03);color:#e6eef8;cursor:pointer">Copy</button><pre style="margin:0;"><code class="language-${escapeHtml(lang)}">${safeCodeHtml}</code></pre></div>`
+            }
+            return `<pre><code class="language-${escapeHtml(lang)}">${safeCodeHtml}</code></pre>`
         }
-        return `<pre><code class="language-${escapeHtml(lang)}">${safeCodeHtml}</code></pre>`
-      }
-      return r
+        return r
     }, [])
 
     const renderedHtml = useMemo(() => {
-      try {
-        // overleaf-lab: F3 — LLM output is attacker-influenceable via document
-        // content, so the marked output is sanitized before being injected into
-        // the page. The whitelist keeps the custom LaTeX-block markup (class,
-        // style, data-code, title) that the copy button depends on.
-        const html = marked.parse(result || 'No result yet.', {
-          renderer,
-        }) as string
-        return DOMPurify.sanitize(html, {
-          ADD_ATTR: ['data-code'],
-          USE_PROFILES: { html: true, svg: false, mathMl: false },
-        })
-      } catch {
-        return escapeHtml(result || 'No result yet.')
-      }
+        try {
+            // overleaf-lab: F3 — LLM output is attacker-influenceable via document
+            // content, so the marked output is sanitized before being injected into
+            // the page. The whitelist keeps the custom LaTeX-block markup (class,
+            // style, data-code, title) that the copy button depends on.
+            const html = marked.parse(result || 'No result yet.', { renderer }) as string
+            return DOMPurify.sanitize(html, {
+                ADD_ATTR: ['data-code'],
+                USE_PROFILES: { html: true, svg: false, mathMl: false },
+            })
+        } catch {
+            return escapeHtml(result || 'No result yet.')
+        }
     }, [result, renderer])
 
     // Copy button delegation
     useEffect(() => {
-      const root = wrapRef.current
-      if (!root) return
-      const handler = (e: MouseEvent) => {
-        const target = e.target as HTMLElement
-        const btn = target.closest
-          ? (target.closest('.llm-copy-latex') as HTMLElement | null)
-          : null
-        if (!btn) return
-        const b64 = btn.getAttribute('data-code')
-        if (!b64) return
-        const code = base64DecodeUnicode(b64)
-        ;(async () => {
-          try {
-            await navigator.clipboard.writeText(code)
-            const prev = btn.innerText
-            btn.innerText = 'OK'
-            setTimeout(() => {
-              btn.innerText = prev
-            }, 900)
-          } catch {
-            btn.innerText = '!'
-            setTimeout(() => {
-              btn.innerText = 'Copy'
-            }, 900)
-          }
-        })()
-      }
-      root.addEventListener('click', handler)
-      return () => root.removeEventListener('click', handler)
+        const root = wrapRef.current
+        if (!root) return
+        const handler = (e: MouseEvent) => {
+            const target = e.target as HTMLElement
+            const btn = target.closest
+                ? (target.closest('.llm-copy-latex') as HTMLElement | null)
+                : null
+            if (!btn) return
+            const b64 = btn.getAttribute('data-code')
+            if (!b64) return
+            const code = base64DecodeUnicode(b64)
+                ; (async () => {
+                    try {
+                        await navigator.clipboard.writeText(code)
+                        const prev = btn.innerText
+                        btn.innerText = 'OK'
+                        setTimeout(() => {
+                            btn.innerText = prev
+                        }, 900)
+                    } catch {
+                        btn.innerText = '!'
+                        setTimeout(() => {
+                            btn.innerText = 'Copy'
+                        }, 900)
+                    }
+                })()
+        }
+        root.addEventListener('click', handler)
+        return () => root.removeEventListener('click', handler)
     }, [])
 
     useImperativeHandle(ref, () => {
-      const api = {
+        const api = {
         // overleaf-lab (owner bug report #6): `preSelection` carries the
         // selection captured by the trigger at pointer-down — authoritative
         // even when the click already cleared the editor's live selection.
-        show: (
-          view: EditorView,
-          preSelection?: {
-            text: string
-            range: { from: number; to: number }
-          } | null
-        ) => {
-          viewRef.current = view
-          sourceAtRequest.current = null
-          setLoading(false)
-          setResult('')
-          setApplyError('')
-          // 選択を失う前に保存された範囲も、現在の本文と照合してから使います。
-          if (
-            preSelection &&
-            (preSelection.range.from < 0 ||
-              preSelection.range.to > view.state.doc.length ||
-              preSelection.range.to < preSelection.range.from ||
-              view.state.sliceDoc(
-                preSelection.range.from,
-                preSelection.range.to
-              ) !== preSelection.text)
-          )
-            return
-          const live = view.state.selection.main
-          let sel = live
-          let selText = live.empty
-            ? ''
-            : view.state.sliceDoc(live.from, live.to)
-          if (selText === '' && preSelection && preSelection.text) {
-            sel = {
-              from: preSelection.range.from,
-              to: preSelection.range.to,
-              empty: false,
+        show: (view: EditorView, preSelection?: { text: string; range: { from: number; to: number } } | null) => {
+            viewRef.current = view
+            const live = view.state.selection.main
+            let sel = live
+            let selText = live.empty ? '' : view.state.sliceDoc(live.from, live.to)
+            if (selText === '' && preSelection && preSelection.text) {
+                sel = { from: preSelection.range.from, to: preSelection.range.to, empty: false }
+                selText = preSelection.text
             }
-            selText = preSelection.text
-          }
-          const isEmpty = !selText
-          if (isEmpty) {
-            const containerW =
-              wrapRef.current?.getBoundingClientRect()?.width ??
-              window.innerWidth
-            const width = Math.max(320, Math.min(560, containerW - 24))
-            setPanelRect({
-              top: 12,
-              left: Math.round(containerW - width - 12),
-              width,
+            const isEmpty = !selText
+            if (isEmpty) {
+                const containerW = wrapRef.current?.getBoundingClientRect()?.width ?? window.innerWidth
+                const width = Math.max(320, Math.min(560, containerW - 24))
+                setPanelRect({ top: 12, left: Math.round(containerW - width - 12), width })
+                setSelectionText('')
+                setSelectionRange(null)
+                setAnchorShown(false)
+                setPanelMode('hidden')
+                document.dispatchEvent(
+                    new CustomEvent('llm-toolbar-active', { detail: { active: true } })
+                )
+                // the toolbar button's caller immediately opens the menu
+                return
+            }
+
+            const wrapRect = wrapRef.current?.getBoundingClientRect()
+            const editorRect = view.dom.getBoundingClientRect()
+            const coordsFrom = view.coordsAtPos(sel.from)
+            const coordsTo = view.coordsAtPos(sel.to)
+            const toLocal = (c: { left: number; top: number }) => ({
+                x: wrapRect ? c.left - wrapRect.left : c.left,
+                y: wrapRect ? c.top - wrapRect.top : c.top,
             })
-            setSelectionText('')
-            setSelectionRange(null)
-            setAnchorShown(false)
+
+            let aTop = 0,
+                aLeft = 0
+            if (coordsFrom && coordsTo) {
+                const top = Math.min(coordsFrom.top, coordsTo.top)
+                const bottom = Math.max(coordsFrom.bottom, coordsTo.bottom)
+                const right = Math.max(coordsFrom.right, coordsTo.right)
+                const midY = top + (bottom - top) / 2
+                aTop = toLocal({ left: 0, top: midY }).y - 14
+                aLeft = toLocal({ left: right, top: 0 }).x - 14
+            } else {
+                aTop =
+                    editorRect.top +
+                    editorRect.height / 2 -
+                    (wrapRect?.top ?? 0) -
+                    14
+                aLeft = editorRect.right - (wrapRect?.left ?? 0) - 44
+            }
+
+            const containerW = wrapRect?.width ?? window.innerWidth
+            const containerH = wrapRect?.height ?? window.innerHeight
+            const clampedTop = Math.round(
+                Math.max(8, Math.min(containerH - 44, aTop))
+            )
+            const clampedLeft = Math.round(
+                Math.max(8, Math.min(containerW - 44, aLeft))
+            )
+
+            const width = Math.max(320, Math.min(560, containerW - 24))
+            const panelTop = Math.round(
+                Math.max(
+                    12,
+                    Math.min(
+                        (wrapRect ? editorRect.top - wrapRect.top : 0) + 52,
+                        containerH - 260 - 12
+                    )
+                )
+            )
+            const panelLeft = Math.round(
+                Math.max(
+                    12,
+                    Math.min(
+                        containerW - width - 12,
+                        (wrapRect ? editorRect.left - wrapRect.left : 0) +
+                        editorRect.width / 2 -
+                        width / 2
+                    )
+                )
+            )
+
+            setPanelRect({ top: panelTop, left: panelLeft, width })
+            setAnchorPos({ top: clampedTop, left: clampedLeft })
+            setSelectionText(selText)
+            setSelectionRange(isEmpty ? null : { from: sel.from, to: sel.to })
+            setAnchorShown(true)
             setPanelMode('hidden')
             document.dispatchEvent(
-              new CustomEvent('llm-toolbar-active', {
-                detail: { active: true },
-              })
+                new CustomEvent('llm-toolbar-active', { detail: { active: true } })
             )
-            // the toolbar button's caller immediately opens the menu
-            return
-          }
-
-          const wrapRect = wrapRef.current?.getBoundingClientRect()
-          const editorRect = view.dom.getBoundingClientRect()
-          const coordsFrom = view.coordsAtPos(sel.from)
-          const coordsTo = view.coordsAtPos(sel.to)
-          const toLocal = (c: { left: number; top: number }) => ({
-            x: wrapRect ? c.left - wrapRect.left : c.left,
-            y: wrapRect ? c.top - wrapRect.top : c.top,
-          })
-
-          let aTop = 0,
-            aLeft = 0
-          if (coordsFrom && coordsTo) {
-            const top = Math.min(coordsFrom.top, coordsTo.top)
-            const bottom = Math.max(coordsFrom.bottom, coordsTo.bottom)
-            const right = Math.max(coordsFrom.right, coordsTo.right)
-            const midY = top + (bottom - top) / 2
-            aTop = toLocal({ left: 0, top: midY }).y - 14
-            aLeft = toLocal({ left: right, top: 0 }).x - 14
-          } else {
-            aTop =
-              editorRect.top + editorRect.height / 2 - (wrapRect?.top ?? 0) - 14
-            aLeft = editorRect.right - (wrapRect?.left ?? 0) - 44
-          }
-
-          const containerW = wrapRect?.width ?? window.innerWidth
-          const containerH = wrapRect?.height ?? window.innerHeight
-          const clampedTop = Math.round(
-            Math.max(8, Math.min(containerH - 44, aTop))
-          )
-          const clampedLeft = Math.round(
-            Math.max(8, Math.min(containerW - 44, aLeft))
-          )
-
-          const width = Math.max(320, Math.min(560, containerW - 24))
-          const panelTop = Math.round(
-            Math.max(
-              12,
-              Math.min(
-                (wrapRect ? editorRect.top - wrapRect.top : 0) + 52,
-                containerH - 260 - 12
-              )
-            )
-          )
-          const panelLeft = Math.round(
-            Math.max(
-              12,
-              Math.min(
-                containerW - width - 12,
-                (wrapRect ? editorRect.left - wrapRect.left : 0) +
-                  editorRect.width / 2 -
-                  width / 2
-              )
-            )
-          )
-
-          setPanelRect({ top: panelTop, left: panelLeft, width })
-          setAnchorPos({ top: clampedTop, left: clampedLeft })
-          setSelectionText(selText)
-          setSelectionRange(isEmpty ? null : { from: sel.from, to: sel.to })
-          setAnchorShown(true)
-          setPanelMode('hidden')
-          document.dispatchEvent(
-            new CustomEvent('llm-toolbar-active', { detail: { active: true } })
-          )
         },
         hide: () => {
-          setAnchorShown(false)
-          setPanelMode('hidden')
-          setTranslateOpen(false)
-          setLangQuery('')
-          document.dispatchEvent(
-            new CustomEvent('llm-toolbar-active', { detail: { active: false } })
-          )
+            setAnchorShown(false)
+            setPanelMode('hidden')
+            setTranslateOpen(false)
+            setLangQuery('')
+            document.dispatchEvent(
+                new CustomEvent('llm-toolbar-active', { detail: { active: false } })
+            )
         },
         openMenu: () => {
-          setAnchorShown(true)
-          setPanelMode('menu')
+            setAnchorShown(true)
+            setPanelMode('menu')
         },
         getSelectedText: () => selectionText,
-      }
-      apiRef.current = api
-      return api
+        }
+        apiRef.current = api
+        return api
     })
 
     // overleaf-lab (2026-08): the editor toolbar "Ask AI" button (a module in
     // sourceEditorToolbarStartButtons, rendered outside this React tree) asks
     // for the context menu via this document event, passing its view.
     useEffect(() => {
-      const handler = (e: Event) => {
-        const detail = (e as CustomEvent).detail || {}
-        const view = detail.view as EditorView | undefined
-        if (!view) return
-        const pre =
-          typeof detail.text === 'string' && detail.text.length > 0
-            ? {
-                text: detail.text as string,
-                range:
-                  detail.range?.from != null
-                    ? { from: detail.range.from, to: detail.range.to }
-                    : { from: 0, to: 0 },
-              }
-            : null
-        apiRef.current?.show(view, pre)
-        apiRef.current?.openMenu()
-      }
-      document.addEventListener('ol-llm-open-ask-ai', handler)
-      return () => document.removeEventListener('ol-llm-open-ask-ai', handler)
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent).detail || {}
+            const view = detail.view as EditorView | undefined
+            if (!view) return
+            const pre = typeof detail.text === 'string' && detail.text.length > 0
+                ? { text: detail.text as string, range: detail.range?.from != null ? { from: detail.range.from, to: detail.range.to } : { from: 0, to: 0 } }
+                : null
+            apiRef.current?.show(view, pre)
+            apiRef.current?.openMenu()
+        }
+        document.addEventListener('ol-llm-open-ask-ai', handler)
+        return () => document.removeEventListener('ol-llm-open-ask-ai', handler)
     }, [])
 
     // overleaf-lab (owner bug report #6): context sensitivity is decided at
@@ -687,197 +598,179 @@ const LLMToolbar = forwardRef<LLMToolbarHandle, Record<string, never>>(
     // must not flip between the two item sets mid-navigation.
 
     useEffect(() => {
-      if (panelMode !== 'hidden') {
-        requestAnimationFrame(() =>
-          inputRef.current?.focus({ preventScroll: true } as any)
-        )
-      }
+        if (panelMode !== 'hidden') {
+            requestAnimationFrame(() =>
+                inputRef.current?.focus({ preventScroll: true } as any)
+            )
+        }
     }, [panelMode])
 
     const onInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      // Enter で送信。日本語 IME の変換確定の Enter では送信しない
-      // （変換中は isComposing / keyCode 229 で判別し、IME 側に Enter を渡す）。
-      if (
-        e.key === 'Enter' &&
-        !e.shiftKey &&
-        !e.nativeEvent.isComposing &&
-        e.keyCode !== 229
-      ) {
-        e.preventDefault()
-        startFetch(0, 'chat')
-      } else if (e.key === 'Escape') {
-        setPanelMode('hidden')
-        setAnchorShown(false)
-      }
+        // Enter で送信。日本語 IME の変換確定の Enter では送信しない
+        // （変換中は isComposing / keyCode 229 で判別し、IME 側に Enter を渡す）。
+        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+            e.preventDefault()
+            startFetch(0, 'chat')
+        } else if (e.key === 'Escape') {
+            setPanelMode('hidden')
+            setAnchorShown(false)
+        }
     }
 
     const replaceSelectionWith = (text: string) => {
-      const view = viewRef.current
-      const r = selectionRange
-      if (!view || !r) return
-      // モデルの応答待ちに共同編集やMCPから変更が入った場合も、古い範囲へ書き込みません。
-      if (!canApplyTo(view)) {
-        setApplyError(
-          '本文が変更されたか、書き込みできません。もう一度依頼するか、回答をコピーしてください。'
-        )
-        return
-      }
-      view.dispatch({ changes: { from: r.from, to: r.to, insert: text } })
-      setPanelMode('hidden')
-      setAnchorShown(false)
-      setResult('')
-      setQuery('')
+        const view = viewRef.current
+        const r = selectionRange
+        if (!view || !r) return
+        view.dispatch({ changes: { from: r.from, to: r.to, insert: text } })
+        setPanelMode('hidden')
+        setAnchorShown(false)
+        setResult('')
+        setQuery('')
     }
 
     const insertCodeAfterSelection = (text: string) => {
-      const view = viewRef.current
-      const r = selectionRange
-      if (!view || !r) return
-      // モデルの応答待ちに共同編集やMCPから変更が入った場合も、古い範囲へ書き込みません。
-      if (!canApplyTo(view)) {
-        setApplyError(
-          '本文が変更されたか、書き込みできません。もう一度依頼するか、回答をコピーしてください。'
-        )
-        return
-      }
+        const view = viewRef.current
+        const r = selectionRange
+        if (!view || !r) return
 
-      // Extract LaTeX from markdown
-      const extractLatex = (md: string) => {
-        if (!md) return ''
-        let m: RegExpExecArray | null
-        let collected = ''
+        // Extract LaTeX from markdown
+        const extractLatex = (md: string) => {
+            if (!md) return ''
+            let m: RegExpExecArray | null
+            let collected = ''
 
-        const fencedLangRegex = /```\s*(?:latex|tex)\n([\s\S]*?)```/gi
-        while ((m = fencedLangRegex.exec(md)) !== null)
-          collected += m[1].trim() + '\n'
-        if (collected) return collected.trim()
+            const fencedLangRegex = /```\s*(?:latex|tex)\n([\s\S]*?)```/gi
+            while ((m = fencedLangRegex.exec(md)) !== null)
+                collected += m[1].trim() + '\n'
+            if (collected) return collected.trim()
 
-        const fencedAny = /```(?:\w+)?\n([\s\S]*?)```/g
-        while ((m = fencedAny.exec(md)) !== null) {
-          const code = m[1]
-          if (/\\begin\{|\\[a-zA-Z]+|\\frac\{|\\end\{/.test(code))
-            collected += code.trim() + '\n'
+            const fencedAny = /```(?:\w+)?\n([\s\S]*?)```/g
+            while ((m = fencedAny.exec(md)) !== null) {
+                const code = m[1]
+                if (/\\begin\{|\\[a-zA-Z]+|\\frac\{|\\end\{/.test(code))
+                    collected += code.trim() + '\n'
+            }
+            if (collected) return collected.trim()
+
+            return md.trim()
         }
-        if (collected) return collected.trim()
 
-        return md.trim()
-      }
-
-      const code = extractLatex(text)
-      const toInsert = code ? '\n' + code + '\n' : '\n' + text + '\n'
-      view.dispatch({ changes: { from: r.to, to: r.to, insert: toInsert } })
-      setPanelMode('hidden')
-      setAnchorShown(false)
-      setQuery('')
+        const code = extractLatex(text)
+        const toInsert = code ? '\n' + code + '\n' : '\n' + text + '\n'
+        view.dispatch({ changes: { from: r.to, to: r.to, insert: toInsert } })
+        setPanelMode('hidden')
+        setAnchorShown(false)
+        setQuery('')
     }
 
     const copyToClipboard = async (t: string) => {
-      try {
-        await navigator.clipboard.writeText(t)
-      } catch {
-        // ignore
-      }
+        try {
+            await navigator.clipboard.writeText(t)
+        } catch {
+            // ignore
+        }
     }
 
     const kindToMode: Record<ParaphraseKind, number> = {
-      paraphrase: 1,
-      style: 2,
-      mathfix: 11,
-      summarize: 7,
-      explain: 8,
-      translate: 12,
-      synonyms: 13,
-      checkCitations: 14,
-      title: 9,
-      abstract: 10,
-      keywords: 0, // overleaf-lab: whole-document generator (see startGenerate)
-      chat: 0,
+        paraphrase: 1,
+        style: 2,
+        mathfix: 11,
+        summarize: 7,
+        explain: 8,
+        translate: 12,
+        synonyms: 13,
+        checkCitations: 14,
+        title: 9,
+        abstract: 10,
+        keywords: 0, // overleaf-lab: whole-document generator (see startGenerate)
+        chat: 0,
     }
 
     // overleaf-lab: PR item 13 — whole-document generators (title / abstract /
     // keywords). These do NOT use the selection: the backend reads the full
     // project source (POST /project/:id/llm/generate) and returns the finished
     // text, which renders in the same result panel with copy/edit and Insert.
-    const startGenerate = async (k: 'title' | 'abstract' | 'keywords') => {
-      const projectId = getMeta('ol-project_id')
-      setKind(k)
-      setPanelMode('paraphrase')
-      setLoading(true)
-      setEditMode(false)
-      setShowDiff(false)
-      setResult('')
-      try {
-        const data = await postJSON<{
-          ok?: boolean
-          output?: string
-          error?: string
-          message?: string
-        }>('/project/' + projectId + '/llm/generate', { body: { type: k } })
-        if (data && data.ok) {
-          setResult(String(data.output || ''))
-        } else {
-          setResult(
-            `Generation failed: ${(data && (data.message || data.error)) || 'Unknown error'}`
-          )
+    const startGenerate = async (
+        k: 'title' | 'abstract' | 'keywords'
+    ) => {
+        const projectId = getMeta('ol-project_id')
+        setKind(k)
+        setPanelMode('paraphrase')
+        setLoading(true)
+        setEditMode(false)
+        setShowDiff(false)
+        setResult('')
+        try {
+            const data = await postJSON<{
+                ok?: boolean
+                output?: string
+                error?: string
+                message?: string
+            }>('/project/' + projectId + '/llm/generate', { body: { type: k } })
+            if (data && data.ok) {
+                setResult(String(data.output || ''))
+            }
+            else {
+                setResult(`Generation failed: ${(data && (data.message || data.error)) || 'Unknown error'}`)
+            }
+        } catch (err: any) {
+            setResult(`Generation failed: ${err?.data?.message || err?.data?.detail || err?.message || 'Request failed'}`)
+        } finally {
+            setLoading(false)
         }
-      } catch (err: any) {
-        setResult(
-          `Generation failed: ${err?.data?.message || err?.data?.detail || err?.message || 'Request failed'}`
-        )
-      } finally {
-        setLoading(false)
-      }
     }
 
-    const contentMaxHeight = Math.max(140, Math.round(window.innerHeight * 0.5))
+    const contentMaxHeight = Math.max(
+        140,
+        Math.round(window.innerHeight * 0.5)
+    )
 
     // overleaf-lab: PR item 10 — human-readable reference to the current selection
     // (line range when resolvable). Shown as a chip above the "Ask AI" input and
     // embedded as <selected-text lines="..."> in the outgoing request.
     let selectionRef = ''
     if (selectionText && selectionRange && viewRef.current) {
-      try {
-        const from = viewRef.current.state.doc.lineAt(selectionRange.from)
-        const to = viewRef.current.state.doc.lineAt(selectionRange.to)
-        selectionRef = `${from.number}\u2013${to.number}`
-      } catch {
-        selectionRef = ''
-      }
+        try {
+            const from = viewRef.current.state.doc.lineAt(selectionRange.from)
+            const to = viewRef.current.state.doc.lineAt(selectionRange.to)
+            selectionRef = `${from.number}\u2013${to.number}`
+        } catch {
+            selectionRef = ''
+        }
     }
     const selectionChip = selectionText
-      ? `Selection: ${selectionText.length} chars${selectionRef ? `, lines ${selectionRef}` : ''}`
-      : ''
+        ? `Selection: ${selectionText.length} chars${selectionRef ? `, lines ${selectionRef}` : ''}`
+        : ''
 
     // overleaf-lab: once the flags load, if chat is disabled for this project the
     // toolbar must never surface its anchor/menu/panels. Render the same inert
     // fixed container it shows when there is no selection, so nothing appears.
     if (features.loaded && features.chatEnabled === false) {
-      return (
-        <div
-          ref={wrapRef}
-          style={{
-            position: 'absolute',
-            inset: 0,
-            pointerEvents: 'none',
-            zIndex: 9999,
-          }}
-        />
-      )
+        return (
+            <div
+                ref={wrapRef}
+                style={{
+                    position: 'absolute',
+                    inset: 0,
+                    pointerEvents: 'none',
+                    zIndex: 9999,
+                }}
+            />
+        )
     }
 
     return (
-      <div
-        ref={wrapRef}
-        className="llm-wf-editor-scoped"
-        style={{
-          position: 'absolute',
-          inset: 0,
-          pointerEvents: 'none',
-          zIndex: 9999,
-        }}
-      >
-        {applyError && <p role="alert">{applyError}</p>}
-        <style>{`@keyframes llm-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+        <div
+            ref={wrapRef}
+            className="llm-wf-editor-scoped"
+            style={{
+                position: 'absolute',
+                inset: 0,
+                pointerEvents: 'none',
+                zIndex: 9999,
+            }}
+        >
+            <style>{`@keyframes llm-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
         /* overleaf-lab: upstream-AI (writefull-style) palette — off-white card /
            navy-slate dark panel, navy accent (tokens from llm-ui.scss) */
         .llm-anchor{position:absolute;width:28px;height:28px;border-radius:999px;background:var(--wf-accent,#28518f);color:#fff;font-weight:700;font-size:12px;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 6px 22px rgba(2,6,23,0.35);cursor:pointer;pointer-events:auto}
@@ -926,478 +819,419 @@ const LLMToolbar = forwardRef<LLMToolbarHandle, Record<string, never>>(
         .llm-result-html code{background:var(--wf-code-bg,#f1f4f8);padding:1px 4px;border-radius:4px}
       `}</style>
 
-        {/* Circular AI anchor button - visible after selection */}
-        {anchorShown && panelMode === 'hidden' && !loading && (
-          <button
-            className="llm-anchor"
-            style={{ top: anchorPos.top, left: anchorPos.left }}
-            onClick={() => setPanelMode('menu')}
-            title="AI"
-            aria-label="Ask AI (selection)"
-          >
-            <MaterialIcon type="smart_toy" style={{ fontSize: 15 }} />
-          </button>
-        )}
+            {/* Circular AI anchor button - visible after selection */}
+            {anchorShown && panelMode === 'hidden' && !loading && (
+                <button
+                    className="llm-anchor"
+                    style={{ top: anchorPos.top, left: anchorPos.left }}
+                    onClick={() => setPanelMode('menu')}
+                    title="AI"
+                    aria-label="Ask AI (selection)"
+                >
+                    <MaterialIcon type="smart_toy" style={{ fontSize: 15 }} />
+                </button>
+            )}
 
-        {/* Menu panel */}
-        {anchorShown && panelMode === 'menu' && (
-          <div
-            ref={panelRef}
-            className="llm-panel"
-            style={{
-              top: panelRect.top,
-              left: panelRect.left,
-              width: panelRect.width,
-            }}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {/* overleaf-lab (owner 2026-08, upstream reference):
+            {/* Menu panel */}
+            {anchorShown && panelMode === 'menu' && (
+                <div
+                    ref={panelRef}
+                    className="llm-panel"
+                    style={{
+                        top: panelRect.top,
+                        left: panelRect.left,
+                        width: panelRect.width,
+                    }}
+                >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {/* overleaf-lab (owner 2026-08, upstream reference):
                             single ask row — smart_toy mark, free-form input,
                             send icon; the selection chip is a quiet meta line
                             above it (no more 'AI' text badge). */}
-              <div className="llm-input-card">
-                {selectionChip ? (
-                  <div className="llm-ask-meta">{selectionChip}</div>
-                ) : null}
-                <div className="llm-ask-row">
-                  <span className="llm-ask-icon" aria-hidden="true">
-                    <MaterialIcon type="smart_toy" style={{ fontSize: 20 }} />
-                  </span>
-                  <textarea
-                    ref={inputRef}
-                    className="llm-input"
-                    placeholder="Ask AI for help with anything"
-                    value={query}
-                    onChange={e => setQuery(e.target.value)}
-                    onKeyDown={onInputKeyDown}
-                    rows={1}
-                  />
-                  <button
-                    className="llm-send"
-                    onClick={() => startFetch(0, 'chat')}
-                    title="Send"
-                    aria-label="Send"
-                  >
-                    <MaterialIcon type="send" style={{ fontSize: 17 }} />
-                  </button>
-                  <button
-                    className="llm-close"
-                    onClick={() => {
-                      setPanelMode('hidden')
-                      setAnchorShown(false)
-                    }}
-                    title="Close"
-                    aria-label="Close"
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
-
-              <div
-                className="llm-menu"
-                style={{ width: Math.min(220, panelRect.width - 36) }}
-                role="menu"
-              >
-                {selectionText ? (
-                  <>
-                    <AskAiMenuItem
-                      icon="transform"
-                      label="Rephrase"
-                      onClick={() => startFetch(1, 'paraphrase')}
-                    />
-                    <AskAiMenuItem
-                      icon="text_fields"
-                      label="Shorten"
-                      onClick={() => startFetch(3, 'style')}
-                    />
-                    <AskAiMenuItem
-                      icon="school"
-                      label="More scientific"
-                      onClick={() => startFetch(2, 'style')}
-                    />
-                    <AskAiMenuItem
-                      icon="translate"
-                      label="Translate"
-                      onClick={() => setTranslateOpen(v => !v)}
-                    />
-                    {translateOpen && (
-                      <div className="llm-translate-sub">
-                        <input
-                          className="llm-lang-search"
-                          type="search"
-                          placeholder="Search language…"
-                          value={langQuery}
-                          onChange={e => setLangQuery(e.target.value)}
-                          onClick={e => e.stopPropagation()}
-                        />
-                        <div className="llm-lang-list">
-                          {TRANSLATE_LANGUAGES.filter(l =>
-                            l
-                              .toLowerCase()
-                              .includes(langQuery.trim().toLowerCase())
-                          ).map(lang => (
-                            <AskAiMenuItem
-                              key={lang}
-                              icon=""
-                              label={lang}
-                              onClick={() => {
-                                setTranslateOpen(false)
-                                setLangQuery('')
-                                startFetch(12, 'translate', undefined, {
-                                  language: lang,
-                                })
-                              }}
-                            />
-                          ))}
-                          {TRANSLATE_LANGUAGES.filter(l =>
-                            l
-                              .toLowerCase()
-                              .includes(langQuery.trim().toLowerCase())
-                          ).length === 0 && (
-                            <div className="llm-lang-empty">
-                              No matching language
+                        <div className="llm-input-card">
+                            {selectionChip ? (
+                                <div className="llm-ask-meta">{selectionChip}</div>
+                            ) : null}
+                            <div className="llm-ask-row">
+                                <span className="llm-ask-icon" aria-hidden="true">
+                                    <MaterialIcon type="smart_toy" style={{ fontSize: 20 }} />
+                                </span>
+                                <textarea
+                                    ref={inputRef}
+                                    className="llm-input"
+                                    placeholder="Ask AI for help with anything"
+                                    value={query}
+                                    onChange={e => setQuery(e.target.value)}
+                                    onKeyDown={onInputKeyDown}
+                                    rows={1}
+                                />
+                                <button
+                                    className="llm-send"
+                                    onClick={() => startFetch(0, 'chat')}
+                                    title="Send"
+                                    aria-label="Send"
+                                >
+                                    <MaterialIcon type="send" style={{ fontSize: 17 }} />
+                                </button>
+                                <button
+                                    className="llm-close"
+                                    onClick={() => {
+                                        setPanelMode('hidden')
+                                        setAnchorShown(false)
+                                    }}
+                                    title="Close"
+                                    aria-label="Close"
+                                >
+                                    ×
+                                </button>
                             </div>
-                          )}
                         </div>
-                      </div>
-                    )}
-                    <div className="llm-menu-divider" role="separator" />
-                    <AskAiMenuItem
-                      icon="search"
-                      label="Synonyms"
-                      onClick={() => startFetch(13, 'synonyms')}
-                    />
-                  </>
-                ) : (
-                  <>
-                    {/* overleaf-lab (reference-synced): nothing selected —
-                                        whole-document generators (like the reference menu) */}
-                    <AskAiMenuItem
-                      icon="password"
-                      label="Title Generator"
-                      onClick={() => startGenerate('title')}
-                    />
-                    <AskAiMenuItem
-                      icon="subject"
-                      label="Abstract Generator"
-                      onClick={() => startGenerate('abstract')}
-                    />
-                    <AskAiMenuItem
-                      icon="label"
-                      label="Keywords Generator"
-                      onClick={() => startGenerate('keywords')}
-                    />
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
 
-        {/* Chat panel */}
-        {anchorShown && panelMode === 'chat' && (
-          <div
-            ref={panelRef}
-            className="llm-panel"
-            style={{
-              top: panelRect.top,
-              left: panelRect.left,
-              width: panelRect.width,
-            }}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div className="llm-input-card">
-                <div className="llm-badge">AI</div>
-                {selectionChip ? (
-                  <div
-                    style={{
-                      width: '100%',
-                      fontSize: 11,
-                      color: 'var(--wf-muted, #8fa2bd)',
-                      background: 'var(--wf-row-hover, rgba(125,125,125,0.12))',
-                      borderRadius: 6,
-                      padding: '4px 8px',
-                      boxSizing: 'border-box',
-                    }}
-                  >
-                    {selectionChip}
-                  </div>
-                ) : null}
-                <textarea
-                  ref={inputRef}
-                  className="llm-input"
-                  placeholder="Ask AI for help"
-                  value={query}
-                  onChange={e => setQuery(e.target.value)}
-                  onKeyDown={onInputKeyDown}
-                  rows={1}
-                />
-                <button
-                  className="llm-send"
-                  onClick={() => startFetch(0, 'chat')}
-                  title="Send"
-                >
-                  ↑
-                </button>
-                <button
-                  className="llm-close"
-                  onClick={() => {
-                    setPanelMode('hidden')
-                    setAnchorShown(false)
-                    setQuery('')
-                  }}
-                  title="Close"
-                >
-                  ×
-                </button>
-              </div>
-
-              <div className="llm-paraphrase-card">
-                <div
-                  style={{ fontSize: 13, color: 'var(--wf-muted, #9fb0c6)' }}
-                >
-                  {kindTitleMap['chat']}
-                </div>
-
-                {loading ? (
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      padding: 24,
-                    }}
-                  >
-                    <Spinner />
-                    <div
-                      style={{
-                        marginLeft: 10,
-                        color: 'var(--wf-muted, #9aa4b2)',
-                      }}
-                    >
-                      Waiting for AI...
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div
-                      style={{
-                        minHeight: 88,
-                        maxHeight: contentMaxHeight,
-                        overflowY: 'auto',
-                        overflowX: 'hidden',
-                        paddingRight: 8,
-                      }}
-                    >
-                      <div
-                        className="llm-result-html"
-                        dangerouslySetInnerHTML={{ __html: renderedHtml }}
-                      />
-                    </div>
-
-                    <div className="llm-paraphrase-footer">
-                      <button
-                        className="llm-btn llm-primary"
-                        onClick={() => {
-                          setPanelMode('hidden')
-                          setQuery('')
-                          setResult('')
-                        }}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        className="llm-btn llm-primary"
-                        onClick={() => insertCodeAfterSelection(result)}
-                        disabled={!result}
-                      >
-                        Insert
-                      </button>
-                      <button
-                        className="llm-btn llm-primary"
-                        onClick={() => startFetch(0, 'chat')}
-                        disabled={loading || !query.trim()}
-                      >
-                        Regenerate
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Paraphrase panel */}
-        {panelMode === 'paraphrase' && (
-          <div
-            className="llm-panel"
-            style={{
-              top: panelRect.top,
-              left: panelRect.left,
-              width: panelRect.width,
-            }}
-          >
-            <div className="llm-paraphrase-card">
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  marginBottom: 8,
-                }}
-              >
-                <div
-                  style={{ fontSize: 13, color: 'var(--wf-muted, #9fb0c6)' }}
-                >
-                  {kindTitleMap[kind]}
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    className="llm-btn"
-                    onClick={() => copyToClipboard(result)}
-                  >
-                    Copy
-                  </button>
-                  <button
-                    className="llm-btn"
-                    onClick={() => setEditMode(s => !s)}
-                  >
-                    {editMode ? 'Done' : 'Edit'}
-                  </button>
-                  {kind !== 'title' &&
-                    kind !== 'abstract' &&
-                    kind !== 'keywords' && (
-                      <button
-                        className="llm-btn"
-                        onClick={() => setShowDiff(s => !s)}
-                      >
-                        {showDiff ? 'Hide' : 'Track'}
-                      </button>
-                    )}
-                </div>
-              </div>
-
-              {loading ? (
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: 24,
-                  }}
-                >
-                  <Spinner />
-                  <div
-                    style={{
-                      marginLeft: 10,
-                      color: 'var(--wf-muted, #9aa4b2)',
-                    }}
-                  >
-                    Waiting for AI...
-                  </div>
-                </div>
-              ) : (
-                <>
-                  {editMode ? (
-                    <textarea
-                      ref={editRef}
-                      value={result}
-                      onChange={e => setResult(e.target.value)}
-                      style={{
-                        width: '100%',
-                        minHeight: 88,
-                        maxHeight: contentMaxHeight,
-                        overflowY: 'auto',
-                        overflowX: 'hidden',
-                        padding: 10,
-                        borderRadius: 8,
-                        background: 'rgba(255,255,255,0.02)',
-                        color: '#e6eef8',
-                        outline: 'none',
-                        resize: 'vertical',
-                        boxSizing: 'border-box',
-                        border: 'none',
-                      }}
-                    />
-                  ) : (
-                    <div style={{ minHeight: 88 }}>
-                      <div
-                        style={{
-                          maxHeight: contentMaxHeight,
-                          overflowY: 'auto',
-                          overflowX: 'hidden',
-                          paddingRight: 8,
-                        }}
-                      >
                         <div
-                          className="llm-result-html"
-                          style={{ color: '#e6eef8' }}
-                          dangerouslySetInnerHTML={{ __html: renderedHtml }}
-                        />
-                      </div>
+                            className="llm-menu"
+                            style={{ width: Math.min(220, panelRect.width - 36) }}
+                            role="menu"
+                        >
+                            {selectionText ? (
+                                <>
+
+                                    <AskAiMenuItem icon="transform" label="Rephrase" onClick={() => startFetch(1, 'paraphrase')} />
+                                    <AskAiMenuItem icon="text_fields" label="Shorten" onClick={() => startFetch(3, 'style')} />
+                                    <AskAiMenuItem icon="school" label="More scientific" onClick={() => startFetch(2, 'style')} />
+                                    <AskAiMenuItem icon="translate" label="Translate" onClick={() => setTranslateOpen(v => !v)} />
+                                    {translateOpen && (
+                                        <div className="llm-translate-sub">
+                                            <input
+                                                className="llm-lang-search"
+                                                type="search"
+                                                placeholder="Search language…"
+                                                value={langQuery}
+                                                onChange={e => setLangQuery(e.target.value)}
+                                                onClick={e => e.stopPropagation()}
+                                            />
+                                            <div className="llm-lang-list">
+                                                {TRANSLATE_LANGUAGES
+                                                    .filter(l => l.toLowerCase().includes(langQuery.trim().toLowerCase()))
+                                                    .map(lang => (
+                                                        <AskAiMenuItem
+                                                            key={lang}
+                                                            icon=""
+                                                            label={lang}
+                                                            onClick={() => {
+                                                                setTranslateOpen(false)
+                                                                setLangQuery('')
+                                                                startFetch(12, 'translate', undefined, { language: lang })
+                                                            }}
+                                                        />
+                                                    ))}
+                                                {TRANSLATE_LANGUAGES.filter(l => l.toLowerCase().includes(langQuery.trim().toLowerCase())).length === 0 && (
+                                                    <div className="llm-lang-empty">No matching language</div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div className="llm-menu-divider" role="separator" />
+                                    <AskAiMenuItem icon="search" label="Synonyms" onClick={() => startFetch(13, 'synonyms')} />
+                                </>
+                            ) : (
+                                <>
+                                    {/* overleaf-lab (reference-synced): nothing selected —
+                                        whole-document generators (like the reference menu) */}
+                                    <AskAiMenuItem icon="password" label="Title Generator" onClick={() => startGenerate('title')} />
+                                    <AskAiMenuItem icon="subject" label="Abstract Generator" onClick={() => startGenerate('abstract')} />
+                                    <AskAiMenuItem icon="label" label="Keywords Generator" onClick={() => startGenerate('keywords')} />
+                                </>
+                            )}
+
+                        </div>
                     </div>
-                  )}
+                </div>
+            )}
 
-                  <div className="llm-paraphrase-footer">
-                    <button
-                      className="llm-btn llm-primary"
-                      onClick={() => {
-                        setPanelMode('hidden')
-                        setAnchorShown(false)
-                        setResult('')
-                        setQuery('')
-                      }}
-                    >
-                      Cancel
-                    </button>
+            {/* Chat panel */}
+            {anchorShown && panelMode === 'chat' && (
+                <div
+                    ref={panelRef}
+                    className="llm-panel"
+                    style={{
+                        top: panelRect.top,
+                        left: panelRect.left,
+                        width: panelRect.width,
+                    }}
+                >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div className="llm-input-card">
+                            <div className="llm-badge">AI</div>
+                            {selectionChip ? (
+                                <div
+                                    style={{
+                                        width: "100%",
+                                        fontSize: 11,
+                                        color: 'var(--wf-muted, #8fa2bd)',
+                                        background: 'var(--wf-row-hover, rgba(125,125,125,0.12))',
+                                        borderRadius: 6,
+                                        padding: "4px 8px",
+                                        boxSizing: "border-box",
+                                    }}
+                                >
+                                    {selectionChip}
+                                </div>
+                            ) : null}
+                            <textarea
+                                ref={inputRef}
+                                className="llm-input"
+                                placeholder="Ask AI for help"
+                                value={query}
+                                onChange={e => setQuery(e.target.value)}
+                                onKeyDown={onInputKeyDown}
+                                rows={1}
+                            />
+                            <button
+                                className="llm-send"
+                                onClick={() => startFetch(0, 'chat')}
+                                title="Send"
+                            >
+                                ↑
+                            </button>
+                            <button
+                                className="llm-close"
+                                onClick={() => {
+                                    setPanelMode('hidden')
+                                    setAnchorShown(false)
+                                    setQuery('')
+                                }}
+                                title="Close"
+                            >
+                                ×
+                            </button>
+                        </div>
 
-                    {kind === 'title' ||
-                    kind === 'abstract' ||
-                    kind === 'keywords' ? (
-                      <button
-                        className="llm-btn llm-primary"
-                        onClick={() => insertCodeAfterSelection(result)}
-                        disabled={loading || !result}
-                      >
-                        Insert
-                      </button>
-                    ) : kind === 'summarize' || kind === 'explain' ? null : (
-                      <button
-                        className="llm-btn llm-primary"
-                        onClick={() => replaceSelectionWith(result)}
-                        disabled={loading || !result}
-                      >
-                        Replace
-                      </button>
-                    )}
+                        <div className="llm-paraphrase-card">
+                            <div style={{ fontSize: 13, color: 'var(--wf-muted, #9fb0c6)' }}>
+                                {kindTitleMap['chat']}
+                            </div>
 
-                    <button
-                      className="llm-btn llm-primary"
-                      onClick={() =>
-                        kind === 'title' ||
-                        kind === 'abstract' ||
-                        kind === 'keywords'
-                          ? startGenerate(
-                              kind as 'title' | 'abstract' | 'keywords'
-                            )
-                          : startFetch(kindToMode[kind], kind)
-                      }
-                      disabled={loading}
-                    >
-                      Regenerate
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+                            {loading ? (
+                                <div
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        padding: 24,
+                                    }}
+                                >
+                                    <Spinner />
+                                    <div style={{ marginLeft: 10, color: 'var(--wf-muted, #9aa4b2)' }}>
+                                        Waiting for AI...
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    <div
+                                        style={{
+                                            minHeight: 88,
+                                            maxHeight: contentMaxHeight,
+                                            overflowY: 'auto',
+                                            overflowX: 'hidden',
+                                            paddingRight: 8,
+                                        }}
+                                    >
+                                        <div
+                                            className="llm-result-html"
+                                            dangerouslySetInnerHTML={{ __html: renderedHtml }}
+                                        />
+                                    </div>
+
+                                    <div className="llm-paraphrase-footer">
+                                        <button
+                                            className="llm-btn llm-primary"
+                                            onClick={() => {
+                                                setPanelMode('hidden')
+                                                setQuery('')
+                                                setResult('')
+                                            }}
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            className="llm-btn llm-primary"
+                                            onClick={() => insertCodeAfterSelection(result)}
+                                            disabled={!result}
+                                        >
+                                            Insert
+                                        </button>
+                                        <button
+                                            className="llm-btn llm-primary"
+                                            onClick={() => startFetch(0, 'chat')}
+                                            disabled={loading || !query.trim()}
+                                        >
+                                            Regenerate
+                                        </button>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Paraphrase panel */}
+            {panelMode === 'paraphrase' && (
+                <div
+                    className="llm-panel"
+                    style={{
+                        top: panelRect.top,
+                        left: panelRect.left,
+                        width: panelRect.width,
+                    }}
+                >
+                    <div className="llm-paraphrase-card">
+                        <div
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                marginBottom: 8,
+                            }}
+                        >
+                            <div style={{ fontSize: 13, color: 'var(--wf-muted, #9fb0c6)' }}>
+                                {kindTitleMap[kind]}
+                            </div>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                                <button
+                                    className="llm-btn"
+                                    onClick={() => copyToClipboard(result)}
+                                >
+                                    Copy
+                                </button>
+                                <button
+                                    className="llm-btn"
+                                    onClick={() => setEditMode(s => !s)}
+                                >
+                                    {editMode ? 'Done' : 'Edit'}
+                                </button>
+                                {kind !== 'title' && kind !== 'abstract' && kind !== 'keywords' && (
+                                    <button
+                                        className="llm-btn"
+                                        onClick={() => setShowDiff(s => !s)}
+                                    >
+                                        {showDiff ? 'Hide' : 'Track'}
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {loading ? (
+                            <div
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    padding: 24,
+                                }}
+                            >
+                                <Spinner />
+                                <div style={{ marginLeft: 10, color: 'var(--wf-muted, #9aa4b2)' }}>
+                                    Waiting for AI...
+                                </div>
+                            </div>
+                        ) : (
+                            <>
+                                {editMode ? (
+                                    <textarea
+                                        ref={editRef}
+                                        value={result}
+                                        onChange={e => setResult(e.target.value)}
+                                        style={{
+                                            width: '100%',
+                                            minHeight: 88,
+                                            maxHeight: contentMaxHeight,
+                                            overflowY: 'auto',
+                                            overflowX: 'hidden',
+                                            padding: 10,
+                                            borderRadius: 8,
+                                            background: 'rgba(255,255,255,0.02)',
+                                            color: '#e6eef8',
+                                            outline: 'none',
+                                            resize: 'vertical',
+                                            boxSizing: 'border-box',
+                                            border: 'none',
+                                        }}
+                                    />
+                                ) : (
+                                    <div style={{ minHeight: 88 }}>
+                                        <div
+                                            style={{
+                                                maxHeight: contentMaxHeight,
+                                                overflowY: 'auto',
+                                                overflowX: 'hidden',
+                                                paddingRight: 8,
+                                            }}
+                                        >
+                                            <div
+                                                className="llm-result-html"
+                                                style={{ color: '#e6eef8' }}
+                                                dangerouslySetInnerHTML={{ __html: renderedHtml }}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="llm-paraphrase-footer">
+                                    <button
+                                        className="llm-btn llm-primary"
+                                        onClick={() => {
+                                            setPanelMode('hidden')
+                                            setAnchorShown(false)
+                                            setResult('')
+                                            setQuery('')
+                                        }}
+                                    >
+                                        Cancel
+                                    </button>
+
+                                    {kind === 'title' || kind === 'abstract' || kind === 'keywords' ? (
+                                        <button
+                                            className="llm-btn llm-primary"
+                                            onClick={() => insertCodeAfterSelection(result)}
+                                            disabled={loading || !result}
+                                        >
+                                            Insert
+                                        </button>
+                                    ) : kind === 'summarize' || kind === 'explain' ? null : (
+                                        <button
+                                            className="llm-btn llm-primary"
+                                            onClick={() => replaceSelectionWith(result)}
+                                            disabled={loading || !result}
+                                        >
+                                            Replace
+                                        </button>
+                                    )}
+
+                                    <button
+                                        className="llm-btn llm-primary"
+                                        onClick={() =>
+                                            kind === 'title' ||
+                                            kind === 'abstract' ||
+                                            kind === 'keywords'
+                                                ? startGenerate(
+                                                      kind as 'title' | 'abstract' | 'keywords'
+                                                  )
+                                                : startFetch(kindToMode[kind], kind)
+                                        }
+                                        disabled={loading}
+                                    >
+                                        Regenerate
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
     )
-  }
-)
+})
 
 LLMToolbar.displayName = 'LLMToolbar'
 export default LLMToolbar

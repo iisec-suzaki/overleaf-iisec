@@ -1,110 +1,172 @@
-import { useRef, useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import RailPanelHeader from '@/features/ide-react/components/rail/rail-panel-header'
-import { RailElement } from '@/features/ide-react/util/rail-types'
-import getMeta from '@/utils/meta'
 import LLMChatPane from './llm-chat-pane'
 import LLMCompliancePane from './llm-compliance-pane'
+import { RailElement } from '@/features/ide-react/util/rail-types'
+import getMeta from '@/utils/meta'
 import { useLLMFeatures } from '../hooks/use-llm-features'
-import { useLLMModelSelection } from '../hooks/use-llm-model-selection'
-import { watchEditorTheme } from '../utils/llm-editor-theme'
 import '../../stylesheets/llm-ui.scss'
+import { watchEditorTheme } from '../utils/llm-editor-theme'
 
 function LLMRailPane() {
-  const rootRef = useRef<HTMLDivElement>(null)
-  const features = useLLMFeatures()
-  const [tab, setTab] = useState<'chat' | 'review'>('chat')
-  useEffect(() => {
-    if (features.loaded && !features.chatEnabled && features.reviewEnabled)
-      setTab('review')
-    if (features.loaded && !features.reviewEnabled && features.chatEnabled)
-      setTab('chat')
-  }, [features.loaded, features.chatEnabled, features.reviewEnabled])
-  const models = useLLMModelSelection()
-  useEffect(() => {
-    // レールはエディターとは別のDOMにあるため、配色だけを監視して追従させます。
-    const watcher = watchEditorTheme([rootRef.current])
-    return () => watcher.stop()
-  }, [])
-  return (
-    <div className="llm-rail-panel llm-wf-editor-scoped" ref={rootRef}>
-      <RailPanelHeader title="AI Assistant" />
-      <div role="tablist" aria-label="AI機能">
-        {features.chatEnabled && (
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'chat'}
-            onClick={() => setTab('chat')}
-          >
-            チャット
-          </button>
-        )}
-        {features.reviewEnabled && (
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'review'}
-            onClick={() => setTab('review')}
-          >
-            文書レビュー
-          </button>
-        )}
-      </div>
-      {features.loaded && !features.chatEnabled && !features.reviewEnabled && (
-        <p>管理者によってAI機能が無効になっています。</p>
-      )}
-      {/* 非表示側もマウントを保ち、タブ切替で会話やレビューの進行状況を失わないようにします。 */}
-      {features.chatEnabled && (
-        <div
-          style={{
-            display: tab === 'chat' ? 'flex' : 'none',
-            flexDirection: 'column',
-            flex: 1,
-            minHeight: 0,
-          }}
-        >
-          <label style={{ padding: 8 }}>
-            モデル
-            <select
-              aria-label="チャットのモデル"
-              value={models.selected}
-              disabled={!models.loaded || models.saving}
-              onChange={event => models.apply(event.target.value)}
-            >
-              <option value="">既定のモデル</option>
-              {models.options.map(option => (
-                <option key={option.value} value={option.value}>
-                  {option.rowName ? `${option.rowName} · ` : ''}
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          {models.saveError && <p role="alert">{models.saveError}</p>}
-          <LLMChatPane />
+    const { t } = useTranslation()
+    const rootRef = React.useRef<HTMLDivElement>(null)
+
+    // overleaf-lab (owner request 2026-08-25): the AI surfaces inside the IDE
+    // follow the EDITOR theme (Appearance → Editor theme): read the live
+    // editor colors into --wf-editor-bg/-fg on this root, event-driven only
+    // (MutationObserver on the html dark toggle + the editor element).
+    React.useEffect(() => {
+        const watcher = watchEditorTheme([rootRef.current])
+        return () => watcher.stop()
+    }, [])
+
+    // overleaf-lab: switch between the chat assistant and the whole-document
+    // compliance review inside the same rail panel.
+    const [tab, setTab] = useState<'chat' | 'review'>('chat')
+
+    // overleaf-lab: super-admin feature flags decide which tabs exist. Chat maps
+    // to the chat pane, review to the compliance pane. Until the flags load both
+    // default to visible (fail open) so nothing flickers off then on.
+    const features = useLLMFeatures()
+    const chatVisible = features.chatEnabled
+    const reviewVisible = features.reviewEnabled
+
+    // overleaf-lab: never leave the active tab pointing at a hidden pane. Once the
+    // flags are loaded, fall back to whichever tab is still visible.
+    useEffect(() => {
+        if (!features.loaded) return
+        if (tab === 'chat' && !chatVisible && reviewVisible) {
+            setTab('review')
+        } else if (tab === 'review' && !reviewVisible && chatVisible) {
+            setTab('chat')
+        }
+    }, [features.loaded, chatVisible, reviewVisible, tab])
+
+    const tabButtonStyle = (active: boolean): React.CSSProperties => ({
+        appearance: 'none',
+        background: 'none',
+        border: 'none',
+        padding: '6px 12px',
+        cursor: 'pointer',
+        // overleaf-lab: inherit the panel's themed text color for BOTH tabs (same
+        // color as the "AI Assistant" header, so legible on light and dark), and
+        // distinguish the active one with weight + an accent underline, the inactive
+        // one with reduced opacity. Using inherit avoids depending on a token that
+        // did not flip on dark (--content-primary read dark-on-dark before).
+        color: 'inherit',
+        opacity: active ? 1 : 0.6,
+        fontWeight: active ? 600 : 400,
+        borderBottom: active
+            ? '2px solid var(--wf-accent, var(--bg-accent-01, #3265b5))'
+            : '2px solid transparent',
+    })
+
+    return (
+        <div className="llm-rail-panel llm-wf-editor-scoped" ref={rootRef}>
+            <RailPanelHeader title={t('ai_assistant', 'AI Assistant')} />
+
+            {features.loaded && !chatVisible && !reviewVisible ? (
+                // overleaf-lab: the admin disabled every AI feature for this
+                // project, so there is nothing to show.
+                <div
+                    style={{
+                        padding: '12px',
+                        color: 'var(--content-secondary, inherit)',
+                        opacity: 0.7,
+                        fontSize: 13,
+                    }}
+                >
+                    {t(
+                        'llm_all_features_disabled',
+                        'AI features are currently disabled by the administrator.'
+                    )}
+                </div>
+            ) : (
+                <>
+                    {/* overleaf-lab: only show the two-tab bar when BOTH panes are
+                        available; with a single feature the tab bar is redundant. */}
+                    {chatVisible && reviewVisible && (
+                        <div
+                            style={{
+                                display: 'flex',
+                                gap: 4,
+                                borderBottom: '1px solid var(--border-divider, rgba(125,125,125,0.2))',
+                            }}
+                            role="tablist"
+                        >
+                            <button
+                                type="button"
+                                role="tab"
+                                aria-selected={tab === 'chat'}
+                                style={tabButtonStyle(tab === 'chat')}
+                                onClick={() => setTab('chat')}
+                            >
+                                {t('chat', 'Chat')}
+                            </button>
+                            <button
+                                type="button"
+                                role="tab"
+                                aria-selected={tab === 'review'}
+                                style={tabButtonStyle(tab === 'review')}
+                                onClick={() => setTab('review')}
+                            >
+                                {t('review', 'Review')}
+                            </button>
+                        </div>
+                    )}
+
+                    {/* overleaf-lab: when both panes are enabled keep BOTH mounted
+                        and toggle visibility, so a running review (and its
+                        polling/queue state) survives a tab switch. With a single
+                        feature only that pane is mounted, always shown. */}
+                    {chatVisible && (
+                        <div
+                            style={{
+                                display: reviewVisible
+                                    ? tab === 'chat'
+                                        ? 'flex'
+                                        : 'none'
+                                    : 'flex',
+                                flexDirection: 'column',
+                                flex: 1,
+                                minHeight: 0,
+                                overflow: 'hidden',
+                            }}
+                        >
+                            <LLMChatPane />
+                        </div>
+                    )}
+                    {reviewVisible && (
+                        <div
+                            style={{
+                                display: chatVisible
+                                    ? tab === 'review'
+                                        ? 'flex'
+                                        : 'none'
+                                    : 'flex',
+                                flexDirection: 'column',
+                                flex: 1,
+                                minHeight: 0,
+                                overflow: 'hidden',
+                            }}
+                        >
+                            <LLMCompliancePane />
+                        </div>
+                    )}
+                </>
+            )}
         </div>
-      )}
-      {features.reviewEnabled && (
-        <div
-          style={{
-            display: tab === 'review' ? 'flex' : 'none',
-            flexDirection: 'column',
-            flex: 1,
-            minHeight: 0,
-          }}
-        >
-          <LLMCompliancePane />
-        </div>
-      )}
-    </div>
-  )
+    )
 }
 
-const entry: RailElement = {
-  key: 'llm-chat',
-  icon: 'smart_toy',
-  title: 'AI Assistant',
-  component: <LLMRailPane />,
-  hide: () => !getMeta('ol-ExposedSettings').llmEnabled,
+const llmRailEntry: RailElement = {
+    key: 'llm-chat',
+    icon: 'smart_toy',
+    title: 'AI Assistant',
+    component: <LLMRailPane />,
+    hide: () => !(getMeta('ol-ExposedSettings') as any)?.llmEnabled,
 }
-export default entry
+
+export default llmRailEntry

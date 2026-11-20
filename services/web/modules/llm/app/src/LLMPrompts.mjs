@@ -62,27 +62,27 @@ Use "ok" when clearly satisfied, "partial" when partially satisfied or only part
 // checkCitations templates; title/abstract/keywords run through the
 // whole-document generators endpoint instead).
 export const DEFAULT_ASK_AI_ACTION_PROMPTS = {
-  paraphrase: `Paraphrase the following LaTeX text. Keep every LaTeX command, math, and citation key intact. Output only the paraphrased text, with no preamble, no explanation, and no code fences. Do not call, name, or simulate any tool, function, or API — answer directly with the text.\n\n{{selection}}`,
-  academic: `Rewrite the following LaTeX text in a fluent, formal academic style, keeping the text's own language. Preserve every LaTeX command, math, and citation key. Output only the rewritten text, with no preamble and no code fences. Do not call, name, or simulate any tool, function, or API — answer directly with the text.\n\n{{selection}}`,
-  concise: `Rewrite the following LaTeX text more concisely, preserving its meaning and every LaTeX command, math, and citation. Output only the rewritten text, nothing else. Do not call, name, or simulate any tool, function, or API — answer directly with the text.\n\n{{selection}}`,
-  // overleaf-lab (2026-08): reference-synced menu actions — translate (the
-  // extra `{{language}}` placeholder is substituted by the frontend) and a
-  // focused synonym helper.
-  translate: `Translate the following LaTeX text into {{language}}. Keep every LaTeX command, math, and citation key exactly as-is (translate only the natural-language text). Output only the translated text, with no preamble and no code fences. Do not call, name, or simulate any tool, function, or API — answer directly with the translated text.\n\n{{selection}}`,
-  synonyms: `Suggest two or three well-chosen academic synonyms or phrasings for each key content word in the following LaTeX text, one per line, in the format "word — alternative(s)". Keep every LaTeX command intact and do not rewrite the whole text. Output only the list, with no preamble and no code fences, and do not call or simulate any tool or function.\n\n{{selection}}`,
+    paraphrase: `Paraphrase the following LaTeX text. Keep every LaTeX command, math, and citation key intact. Output only the paraphrased text, with no preamble, no explanation, and no code fences. Do not call, name, or simulate any tool, function, or API — answer directly with the text.\n\n{{selection}}`,
+    academic: `Rewrite the following LaTeX text in a fluent, formal academic style, keeping the text's own language. Preserve every LaTeX command, math, and citation key. Output only the rewritten text, with no preamble and no code fences. Do not call, name, or simulate any tool, function, or API — answer directly with the text.\n\n{{selection}}`,
+    concise: `Rewrite the following LaTeX text more concisely, preserving its meaning and every LaTeX command, math, and citation. Output only the rewritten text, nothing else. Do not call, name, or simulate any tool, function, or API — answer directly with the text.\n\n{{selection}}`,
+    // overleaf-lab (2026-08): reference-synced menu actions — translate (the
+    // extra `{{language}}` placeholder is substituted by the frontend) and a
+    // focused synonym helper.
+    translate: `Translate the following LaTeX text into {{language}}. Keep every LaTeX command, math, and citation key exactly as-is (translate only the natural-language text). Output only the translated text, with no preamble and no code fences. Do not call, name, or simulate any tool, function, or API — answer directly with the translated text.\n\n{{selection}}`,
+    synonyms: `Suggest two or three well-chosen academic synonyms or phrasings for each key content word in the following LaTeX text, one per line, in the format "word — alternative(s)". Keep every LaTeX command intact and do not rewrite the whole text. Output only the list, with no preamble and no code fences, and do not call or simulate any tool or function.\n\n{{selection}}`,
 }
 
 // overleaf-lab: return the default action prompts with any valid string overrides
 // from `stored` applied per key. `stored` is expected to be an object; unknown keys
 // are ignored and non-string values fall back to the default for that key.
 export function mergeActionPrompts(stored) {
-  const merged = { ...DEFAULT_ASK_AI_ACTION_PROMPTS }
-  if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
-    for (const key of Object.keys(DEFAULT_ASK_AI_ACTION_PROMPTS)) {
-      if (typeof stored[key] === 'string') {
-        merged[key] = stored[key]
-      }
+    const merged = { ...DEFAULT_ASK_AI_ACTION_PROMPTS }
+    if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+        for (const key of Object.keys(DEFAULT_ASK_AI_ACTION_PROMPTS)) {
+            if (typeof stored[key] === 'string') {
+                merged[key] = stored[key]
+            }
+        }
     }
-  }
-  return merged
+    return merged
 }
