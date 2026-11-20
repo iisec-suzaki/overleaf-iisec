@@ -56,6 +56,8 @@ services:
       LLM_ALLOW_USER_SETTINGS: ${LLM_ALLOW_USER_SETTINGS:-false}
       LLM_KEY_SECRET: ${LLM_KEY_SECRET:-}
       LLM_ADMIN_SETTINGS_PATH: /var/lib/overleaf/data/llm-admin-settings.json
+      # 個人用 MCP アクセストークン（iisec 追加モジュール）。
+      PERSONAL_MCP_ENABLED: ${PERSONAL_MCP_ENABLED:-false}
       # 管理画面未設定時のフォールバックとして使う site 既定の接続先。
       LLM_API_URL: ${LLM_SITE_API_URL:-}
       LLM_API_KEY: ${LLM_SITE_API_KEY:-}
