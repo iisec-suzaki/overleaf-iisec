@@ -30,7 +30,14 @@ import editorCoreSchemas from 'overleaf-editor-core/lib/schemas.js'
 // from there isn't viable, as many unit tests mock the RequestParser module
 // down to an empty object, and this schema module is loaded transitively
 // through those mocks.
-const VALID_COMPILERS = ['pdflatex', 'latex', 'xelatex', 'lualatex']
+const VALID_COMPILERS = [
+  'pdflatex',
+  'latex',
+  'xelatex',
+  'lualatex',
+  'platex',
+  'uplatex',
+]
 
 // Kept in sync explicitly with services/clsi-perf/app/js/Variants.js's
 // setup(), which derives one variant per services/clsi-perf/app/js/variants/
