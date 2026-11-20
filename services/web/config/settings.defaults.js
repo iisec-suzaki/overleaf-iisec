@@ -1252,10 +1252,7 @@ module.exports = {
       ),
     ],
     railEntries: [
-      Path.resolve(
-        __dirname,
-        '../modules/llm/frontend/js/components/llm-rail-pane.tsx'
-      ),
+      // 翻訳・横並びを左に、AI アシスタントを右（fork と同じ並び順）。
       Path.resolve(
         __dirname,
         '../modules/local-llm-translation/frontend/js/rail/translation-rail-entry.tsx'
@@ -1263,6 +1260,10 @@ module.exports = {
       Path.resolve(
         __dirname,
         '../modules/local-llm-translation/frontend/js/rail/split-rail-entry.tsx'
+      ),
+      Path.resolve(
+        __dirname,
+        '../modules/llm/frontend/js/components/llm-rail-pane.tsx'
       ),
     ],
     railPopovers: [],
