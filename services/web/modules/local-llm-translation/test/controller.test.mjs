@@ -1,15 +1,15 @@
-import assert from 'node:assert/strict'
-import { EventEmitter } from 'node:events'
-import { registerHooks } from 'node:module'
-import { beforeEach, test } from 'node:test'
+import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { registerHooks } from "node:module";
+import { beforeEach, test } from "node:test";
 
-const projectId = 'a'.repeat(24)
-const folderId = 'b'.repeat(24)
-const sourceId = 'c'.repeat(24)
-const userId = 'e'.repeat(24)
-let folder
-let sourceDoc
-let writes
+const projectId = "a".repeat(24);
+const folderId = "b".repeat(24);
+const sourceId = "c".repeat(24);
+const userId = "e".repeat(24);
+let folder;
+let sourceDoc;
+let writes;
 
 // DB・リアルタイム通知だけを差し替え、入力検証は本体の実装を使用します。
 const mocks = {
@@ -24,48 +24,48 @@ const mocks = {
   },
   EditorController: { promises: {} },
   DocumentUpdaterHandler: { promises: {} },
-  AuthenticationController: { requireLogin: () => 'login' },
+  AuthenticationController: { requireLogin: () => "login" },
   AuthorizationMiddleware: {
-    blockRestrictedUserFromProject: 'restricted',
-    ensureUserCanReadProject: 'read',
-    ensureUserCanWriteProjectContent: 'write',
-    ensureUserIsSiteAdmin: 'site-admin',
+    blockRestrictedUserFromProject: "restricted",
+    ensureUserCanReadProject: "read",
+    ensureUserCanWriteProjectContent: "write",
+    ensureUserIsSiteAdmin: "site-admin",
   },
-  RateLimiterMiddleware: { rateLimit: () => 'limit' },
-}
-globalThis.__translationMocks = mocks
+  RateLimiterMiddleware: { rateLimit: () => "limit" },
+};
+globalThis.__translationMocks = mocks;
 registerHooks({
   resolve(specifier, context, nextResolve) {
-    if (context.parentURL?.includes('/local-llm-translation/app/src/')) {
+    if (context.parentURL?.includes("/local-llm-translation/app/src/")) {
       const key =
-        specifier === '@overleaf/logger'
-          ? 'logger'
-          : specifier.split('/').pop()?.replace('.mjs', '')
-      if (key in mocks || key === 'RateLimiter') {
-        return { url: `translation-mock:${key}`, shortCircuit: true }
+        specifier === "@overleaf/logger"
+          ? "logger"
+          : specifier.split("/").pop()?.replace(".mjs", "");
+      if (key in mocks || key === "RateLimiter") {
+        return { url: `translation-mock:${key}`, shortCircuit: true };
       }
     }
-    return nextResolve(specifier, context)
+    return nextResolve(specifier, context);
   },
   load(url, context, nextLoad) {
-    if (url.startsWith('translation-mock:')) {
-      const key = url.slice('translation-mock:'.length)
+    if (url.startsWith("translation-mock:")) {
+      const key = url.slice("translation-mock:".length);
       const source =
-        key === 'RateLimiter'
-          ? 'export class RateLimiter {}'
-          : `export default globalThis.__translationMocks[${JSON.stringify(key)}]`
-      return { format: 'module', source, shortCircuit: true }
+        key === "RateLimiter"
+          ? "export class RateLimiter {}"
+          : `export default globalThis.__translationMocks[${JSON.stringify(key)}]`;
+      return { format: "module", source, shortCircuit: true };
     }
-    return nextLoad(url, context)
+    return nextLoad(url, context);
   },
-})
+});
 const { default: controller } =
-  await import('../app/src/LocalLlmTranslationController.mjs')
+  await import("../app/src/LocalLlmTranslationController.mjs");
 const { default: router } =
-  await import('../app/src/LocalLlmTranslationRouter.mjs')
+  await import("../app/src/LocalLlmTranslationRouter.mjs");
 
 function response() {
-  const res = new EventEmitter()
+  const res = new EventEmitter();
   Object.assign(res, {
     statusCode: 200,
     writableEnded: false,
@@ -73,34 +73,34 @@ function response() {
     headersSent: false,
     pieces: [],
     status(code) {
-      this.statusCode = code
-      return this
+      this.statusCode = code;
+      return this;
     },
     json(payload) {
-      this.payload = payload
-      return this
+      this.payload = payload;
+      return this;
     },
     sendStatus(code) {
-      this.statusCode = code
-      return this
+      this.statusCode = code;
+      return this;
     },
     set(headers) {
-      this.headers = headers
-      return this
+      this.headers = headers;
+      return this;
     },
     flushHeaders() {
-      this.headersSent = true
+      this.headersSent = true;
     },
     write(chunk) {
-      this.pieces.push(chunk.toString())
-      return true
+      this.pieces.push(chunk.toString());
+      return true;
     },
     end() {
-      this.writableEnded = true
-      return this
+      this.writableEnded = true;
+      return this;
     },
-  })
-  return res
+  });
+  return res;
 }
 
 async function invoke(handler, body = {}, overrides = {}) {
@@ -109,354 +109,359 @@ async function invoke(handler, body = {}, overrides = {}) {
     body,
     session: {},
     ...overrides,
-  }
-  const res = response()
+  };
+  const res = response();
   await handler(req, res, (error) => {
-    res.error = error
-  })
-  return res
+    res.error = error;
+  });
+  return res;
 }
 
 function saveBody(extra = {}) {
   return {
     source_doc_id: sourceId,
     parent_folder_id: folderId,
-    name: 'main.en.tex',
-    content: 'English\nsecond line',
+    name: "main.en.tex",
+    content: "English\nsecond line",
     overwrite: false,
     ...extra,
-  }
+  };
 }
 
 beforeEach(() => {
-  writes = []
-  sourceDoc = { _id: sourceId, name: 'main.tex' }
-  folder = { _id: folderId, docs: [sourceDoc], fileRefs: [], folders: [] }
-  for (const method of ['addDoc', 'upsertDoc']) {
+  writes = [];
+  sourceDoc = { _id: sourceId, name: "main.tex" };
+  folder = { _id: folderId, docs: [sourceDoc], fileRefs: [], folders: [] };
+  for (const method of ["addDoc", "upsertDoc"]) {
     mocks.EditorController.promises[method] = async (...args) => {
-      writes.push({ method, args })
-      return { _id: 'd'.repeat(24), name: args[2] }
-    }
+      writes.push({ method, args });
+      return { _id: "d".repeat(24), name: args[2] };
+    };
   }
-})
+});
 
-test('英語版を通常の addDoc 経路で保存し、原文は変更しない', async () => {
-  const res = await invoke(controller.saveEnglishDocument, saveBody())
-  assert.equal(res.error, undefined)
-  assert.equal(res.statusCode, 200)
-  assert.equal(res.payload.name, 'main.en.tex')
+test("英語版を通常の addDoc 経路で保存し、原文は変更しない", async () => {
+  const res = await invoke(controller.saveEnglishDocument, saveBody());
+  assert.equal(res.error, undefined);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload.name, "main.en.tex");
   assert.deepEqual(writes, [
     {
-      method: 'addDoc',
+      method: "addDoc",
       args: [
         projectId,
         folderId,
-        'main.en.tex',
-        ['English', 'second line'],
-        'local-llm-translation',
+        "main.en.tex",
+        ["English", "second line"],
+        "local-llm-translation",
         userId,
       ],
     },
-  ])
-  assert.equal(sourceDoc.name, 'main.tex')
-})
+  ]);
+  assert.equal(sourceDoc.name, "main.tex");
+});
 
-test('上書き確認なしの衝突・ファイル移動・誤った保存名を拒否する', async () => {
+test("上書き確認なしの衝突・ファイル移動・誤った保存名を拒否する", async () => {
   for (const extra of [
-    { name: 'other.tex' },
-    { parent_folder_id: 'f'.repeat(24) },
+    { name: "other.tex" },
+    { parent_folder_id: "f".repeat(24) },
   ]) {
     assert.equal(
       (await invoke(controller.saveEnglishDocument, saveBody(extra)))
         .statusCode,
-      409
-    )
+      409,
+    );
   }
-  folder.docs.push({ _id: 'd'.repeat(24), name: 'main.en.tex' })
+  folder.docs.push({ _id: "d".repeat(24), name: "main.en.tex" });
   assert.equal(
     (await invoke(controller.saveEnglishDocument, saveBody())).statusCode,
-    409
-  )
-  assert.equal(writes.length, 0)
+    409,
+  );
+  assert.equal(writes.length, 0);
   assert.equal(
     (
       await invoke(
         controller.saveEnglishDocument,
-        saveBody({ overwrite: true })
+        saveBody({ overwrite: true }),
       )
     ).statusCode,
-    200
-  )
-  assert.equal(writes[0].method, 'upsertDoc')
-})
+    200,
+  );
+  assert.equal(writes[0].method, "upsertDoc");
+});
 
-test('通常ファイル・フォルダーとの衝突を拒否する', async () => {
-  for (const field of ['fileRefs', 'folders']) {
-    folder[field].push({ _id: 'd'.repeat(24), name: 'main.en.tex' })
+test("通常ファイル・フォルダーとの衝突を拒否する", async () => {
+  for (const field of ["fileRefs", "folders"]) {
+    folder[field].push({ _id: "d".repeat(24), name: "main.en.tex" });
     assert.equal(
       (await invoke(controller.saveEnglishDocument, saveBody())).statusCode,
-      409
-    )
-    folder[field] = []
+      409,
+    );
+    folder[field] = [];
   }
-  assert.equal(writes.length, 0)
-})
+  assert.equal(writes.length, 0);
+});
 
-test('不正入力はログだけで通さず、保存処理の前に拒否する', async () => {
+test("不正入力はログだけで通さず、保存処理の前に拒否する", async () => {
   for (const extra of [
-    { source_doc_id: 'invalid' },
-    { overwrite: 'yes' },
+    { source_doc_id: "invalid" },
+    { overwrite: "yes" },
     { unexpected: true },
   ]) {
-    const res = await invoke(controller.saveEnglishDocument, saveBody(extra))
-    assert.ok(res.error)
+    const res = await invoke(controller.saveEnglishDocument, saveBody(extra));
+    assert.ok(res.error);
   }
-  assert.equal(writes.length, 0)
-})
+  assert.equal(writes.length, 0);
+});
 
-test('英語版文書や非 TeX 文書を翻訳元として保存しない', async () => {
-  for (const name of ['main.en.tex', 'references.bib']) {
-    sourceDoc.name = name
+test("英語版文書や非 TeX 文書を翻訳元として保存しない", async () => {
+  for (const name of ["main.en.tex", "references.bib"]) {
+    sourceDoc.name = name;
     assert.equal(
       (await invoke(controller.saveEnglishDocument, saveBody())).statusCode,
-      400
-    )
+      400,
+    );
   }
-  assert.equal(writes.length, 0)
-})
+  assert.equal(writes.length, 0);
+});
 
-test('読み取りと書き込みの権限チェックをルートに登録する', () => {
-  const routes = []
+test("読み取りと書き込みの権限チェックをルートに登録する", () => {
+  const routes = [];
   const webRouter = Object.fromEntries(
-    ['get', 'post', 'put', 'delete'].map((method) => [
+    ["get", "post", "put", "delete"].map((method) => [
       method,
       (...args) => routes.push({ method, args }),
-    ])
-  )
-  router.apply(webRouter)
-  assert.equal(routes.length, 14)
+    ]),
+  );
+  router.apply(webRouter);
+  assert.equal(routes.length, 14);
   for (const { method, args } of routes) {
-    assert.equal(args[1], 'login')
-    if (args[0].startsWith('/project/')) {
-      assert.equal(args[2], 'restricted')
-      assert.equal(args[3], method === 'get' ? 'read' : 'write')
-    } else if (method !== 'get') {
-      assert.equal(args[2], controller.requireSiteAdmin)
+    assert.equal(args[1], "login");
+    if (args[0].startsWith("/project/")) {
+      assert.equal(args[2], "restricted");
+      // 翻訳の実行は原文を読むだけ: read 権限で可（fork 準拠）。保存系は write 必須。
+      const expected =
+        method === "get" || args[0].endsWith("/local-llm/translate")
+          ? "read"
+          : "write";
+      assert.equal(args[3], expected);
+    } else if (method !== "get") {
+      assert.equal(args[2], controller.requireSiteAdmin);
     }
   }
-})
+});
 
-test('翻訳サービスの SSE を蓄積せず転送する', async () => {
-  const original = globalThis.fetch
-  let signal
+test("翻訳サービスの SSE を蓄積せず転送する", async () => {
+  const original = globalThis.fetch;
+  let signal;
   globalThis.fetch = async (_url, options) => {
-    signal = options.signal
-    return new Response('data: {"type":"complete","text":"English"}\n\n')
-  }
+    signal = options.signal;
+    return new Response('data: {"type":"complete","text":"English"}\n\n');
+  };
   try {
     const res = await invoke(controller.translate, {
-      text: '日本語',
-      model: 'test',
-    })
-    assert.equal(res.error, undefined)
-    assert.equal(res.headers['X-Accel-Buffering'], 'no')
+      text: "日本語",
+      model: "test",
+    });
+    assert.equal(res.error, undefined);
+    assert.equal(res.headers["X-Accel-Buffering"], "no");
     assert.equal(
-      res.pieces.join(''),
-      'data: {"type":"complete","text":"English"}\n\n'
-    )
-    assert.equal(res.writableEnded, true)
-    assert.equal(signal.aborted, true)
+      res.pieces.join(""),
+      'data: {"type":"complete","text":"English"}\n\n',
+    );
+    assert.equal(res.writableEnded, true);
+    assert.equal(signal.aborted, true);
   } finally {
-    globalThis.fetch = original
+    globalThis.fetch = original;
   }
-})
+});
 
-test('ブラウザー切断時は翻訳サービスへの接続を中断する', async () => {
-  const original = globalThis.fetch
-  let signal
-  let closed = false
-  const res = response()
+test("ブラウザー切断時は翻訳サービスへの接続を中断する", async () => {
+  const original = globalThis.fetch;
+  let signal;
+  let closed = false;
+  const res = response();
   res.write = () => {
-    res.destroyed = true
-    res.emit('close')
-    return true
-  }
+    res.destroyed = true;
+    res.emit("close");
+    return true;
+  };
   globalThis.fetch = async (_url, options) => {
-    signal = options.signal
+    signal = options.signal;
     return {
       ok: true,
       body: (async function* () {
         try {
-          yield Buffer.from('first')
-          yield Buffer.from('second')
+          yield Buffer.from("first");
+          yield Buffer.from("second");
         } finally {
-          closed = true
+          closed = true;
         }
       })(),
-    }
-  }
+    };
+  };
   try {
     await controller.translate(
       {
         params: { Project_id: projectId },
-        body: { text: '日本語' },
+        body: { text: "日本語" },
         session: {},
       },
       res,
       (error) => {
-        throw error
-      }
-    )
-    assert.equal(signal.aborted, true)
-    assert.equal(closed, true)
+        throw error;
+      },
+    );
+    assert.equal(signal.aborted, true);
+    assert.equal(closed, true);
   } finally {
-    globalThis.fetch = original
+    globalThis.fetch = original;
   }
-})
+});
 
-test('名前付き接続先の更新を検証して中継する', async () => {
-  const original = globalThis.fetch
-  const id = '1'.repeat(16)
-  let observed
+test("名前付き接続先の更新を検証して中継する", async () => {
+  const original = globalThis.fetch;
+  const id = "1".repeat(16);
+  let observed;
   globalThis.fetch = async (url, options) => {
-    observed = { url, body: JSON.parse(options.body) }
-    return Response.json({ id, has_api_key: false })
-  }
+    observed = { url, body: JSON.parse(options.body) };
+    return Response.json({ id, has_api_key: false });
+  };
   try {
     const body = {
-      name: 'edited',
-      base_url: 'http://provider/v1',
+      name: "edited",
+      base_url: "http://provider/v1",
       clear_api_key: true,
-    }
+    };
     const res = await invoke(controller.updateEndpoint, body, {
       params: { Endpoint_id: id },
-    })
-    assert.equal(res.error, undefined)
-    assert.ok(observed.url.endsWith(`/endpoints/${id}`))
-    assert.deepEqual(observed.body, body)
-    assert.equal(res.payload.has_api_key, false)
+    });
+    assert.equal(res.error, undefined);
+    assert.ok(observed.url.endsWith(`/endpoints/${id}`));
+    assert.deepEqual(observed.body, body);
+    assert.equal(res.payload.has_api_key, false);
     const rejected = await invoke(controller.updateEndpoint, body, {
-      params: { Endpoint_id: '../bad' },
-    })
-    assert.ok(rejected.error)
+      params: { Endpoint_id: "../bad" },
+    });
+    assert.ok(rejected.error);
   } finally {
-    globalThis.fetch = original
+    globalThis.fetch = original;
   }
-})
+});
 
-test('モデル取得の接続先 ID は文字列として検証する', async () => {
-  const original = globalThis.fetch
-  const urls = []
+test("モデル取得の接続先 ID は文字列として検証する", async () => {
+  const original = globalThis.fetch;
+  const urls = [];
   globalThis.fetch = async (url) => {
-    urls.push(url)
-    return Response.json({ data: [] })
-  }
+    urls.push(url);
+    return Response.json({ data: [] });
+  };
   try {
-    const id = '2'.repeat(16)
+    const id = "2".repeat(16);
     const res = await invoke(
       controller.getModels,
       {},
-      { query: { endpoint_id: id } }
-    )
-    assert.equal(res.error, undefined)
-    assert.ok(urls[0].endsWith(`/models?endpoint_id=${id}`))
+      { query: { endpoint_id: id } },
+    );
+    assert.equal(res.error, undefined);
+    assert.ok(urls[0].endsWith(`/models?endpoint_id=${id}`));
     const rejected = await invoke(
       controller.getModels,
       {},
-      { query: { endpoint_id: [id] } }
-    )
-    assert.ok(rejected.error)
-    assert.equal(urls.length, 1)
+      { query: { endpoint_id: [id] } },
+    );
+    assert.ok(rejected.error);
+    assert.equal(urls.length, 1);
   } finally {
-    globalThis.fetch = original
+    globalThis.fetch = original;
   }
-})
+});
 
-test('共有接続先の管理 API は一般利用者を JSON の403で拒否する', async () => {
-  const res = response()
-  let allowed = false
+test("共有接続先の管理 API は一般利用者を JSON の403で拒否する", async () => {
+  const res = response();
+  let allowed = false;
   await controller.requireSiteAdmin({ session: {} }, res, () => {
-    allowed = true
-  })
-  assert.equal(res.statusCode, 403)
-  assert.equal(allowed, false)
-  assert.equal(typeof res.payload.detail, 'string')
-  mocks.AuthorizationManager.promises.isUserSiteAdmin = async () => true
+    allowed = true;
+  });
+  assert.equal(res.statusCode, 403);
+  assert.equal(allowed, false);
+  assert.equal(typeof res.payload.detail, "string");
+  mocks.AuthorizationManager.promises.isUserSiteAdmin = async () => true;
   try {
     await controller.requireSiteAdmin({ session: {} }, response(), () => {
-      allowed = true
-    })
-    assert.equal(allowed, true)
+      allowed = true;
+    });
+    assert.equal(allowed, true);
   } finally {
-    mocks.AuthorizationManager.promises.isUserSiteAdmin = async () => false
+    mocks.AuthorizationManager.promises.isUserSiteAdmin = async () => false;
   }
-})
+});
 
-test('横並びは最新の本文と版を読み、保存時にその版を引き渡す', async () => {
+test("横並びは最新の本文と版を読み、保存時にその版を引き渡す", async () => {
   mocks.DocumentUpdaterHandler.promises.getDocument = async () => ({
-    lines: ['fresh', 'content'],
+    lines: ["fresh", "content"],
     version: 7,
-  })
+  });
   const read = await invoke(
     controller.getDocContent,
     {},
-    { query: { doc_id: sourceId } }
-  )
-  assert.deepEqual(read.payload, { content: 'fresh\ncontent', version: 7 })
-  let args
+    { query: { doc_id: sourceId } },
+  );
+  assert.deepEqual(read.payload, { content: "fresh\ncontent", version: 7 });
+  let args;
   mocks.DocumentUpdaterHandler.promises.setDocumentIfVersion = async (
     ...passed
   ) => {
-    args = passed
-    return { version: 8 }
-  }
+    args = passed;
+    return { version: 8 };
+  };
   const saved = await invoke(controller.saveDocContent, {
     doc_id: sourceId,
-    content: 'edited',
+    content: "edited",
     version: 7,
-  })
-  assert.deepEqual(args, [projectId, sourceId, userId, ['edited'], 7])
-  assert.deepEqual(saved.payload, { version: 8 })
-})
+  });
+  assert.deepEqual(args, [projectId, sourceId, userId, ["edited"], 7]);
+  assert.deepEqual(saved.payload, { version: 8 });
+});
 
-test('横並びの競合は 409 になり、版なし・不正版では保存しない', async () => {
+test("横並びの競合は 409 になり、版なし・不正版では保存しない", async () => {
   mocks.DocumentUpdaterHandler.promises.setDocumentIfVersion = async () => {
-    throw Object.assign(new Error('conflict'), { response: { status: 409 } })
-  }
+    throw Object.assign(new Error("conflict"), { response: { status: 409 } });
+  };
   const conflict = await invoke(controller.saveDocContent, {
     doc_id: sourceId,
-    content: 'old snapshot',
+    content: "old snapshot",
     version: 7,
-  })
-  assert.equal(conflict.statusCode, 409)
-  for (const version of [undefined, null, -1, '7']) {
+  });
+  assert.equal(conflict.statusCode, 409);
+  for (const version of [undefined, null, -1, "7"]) {
     const invalid = await invoke(controller.saveDocContent, {
       doc_id: sourceId,
-      content: 'old snapshot',
+      content: "old snapshot",
       version,
-    })
-    assert.ok(invalid.error)
+    });
+    assert.ok(invalid.error);
   }
-})
+});
 
-test('別プロジェクトの文書 ID は更新層へ渡さない', async () => {
-  const original = mocks.ProjectLocator.promises.findElement
-  let called = false
+test("別プロジェクトの文書 ID は更新層へ渡さない", async () => {
+  const original = mocks.ProjectLocator.promises.findElement;
+  let called = false;
   mocks.ProjectLocator.promises.findElement = async () => {
-    throw new Error('document not in this project')
-  }
+    throw new Error("document not in this project");
+  };
   mocks.DocumentUpdaterHandler.promises.setDocumentIfVersion = async () => {
-    called = true
-  }
+    called = true;
+  };
   try {
     const res = await invoke(controller.saveDocContent, {
       doc_id: sourceId,
-      content: 'bad',
+      content: "bad",
       version: 1,
-    })
-    assert.ok(res.error)
-    assert.equal(called, false)
+    });
+    assert.ok(res.error);
+    assert.equal(called, false);
   } finally {
-    mocks.ProjectLocator.promises.findElement = original
+    mocks.ProjectLocator.promises.findElement = original;
   }
-})
+});

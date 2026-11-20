@@ -12,33 +12,33 @@
  *    場所の変更や同名ファイル衝突などの競合は、日本語の案内付き 409 で返します。
  */
 
-import DocumentUpdaterHandler from '../../../../app/src/Features/DocumentUpdater/DocumentUpdaterHandler.mjs'
-import logger from '@overleaf/logger'
-import { expressify } from '@overleaf/promise-utils'
+import DocumentUpdaterHandler from "../../../../app/src/Features/DocumentUpdater/DocumentUpdaterHandler.mjs";
+import logger from "@overleaf/logger";
+import { expressify } from "@overleaf/promise-utils";
 import {
   parseReq,
   z,
   zz,
-} from '../../../../app/src/infrastructure/Validation.mjs'
-import SessionManager from '../../../../app/src/Features/Authentication/SessionManager.mjs'
-import AuthorizationManager from '../../../../app/src/Features/Authorization/AuthorizationManager.mjs'
-import EditorController from '../../../../app/src/Features/Editor/EditorController.mjs'
-import ProjectGetter from '../../../../app/src/Features/Project/ProjectGetter.mjs'
-import ProjectLocator from '../../../../app/src/Features/Project/ProjectLocator.mjs'
+} from "../../../../app/src/infrastructure/Validation.mjs";
+import SessionManager from "../../../../app/src/Features/Authentication/SessionManager.mjs";
+import AuthorizationManager from "../../../../app/src/Features/Authorization/AuthorizationManager.mjs";
+import EditorController from "../../../../app/src/Features/Editor/EditorController.mjs";
+import ProjectGetter from "../../../../app/src/Features/Project/ProjectGetter.mjs";
+import ProjectLocator from "../../../../app/src/Features/Project/ProjectLocator.mjs";
 
 // 翻訳サービスの内部 URL。Compose ネットワーク名で解決されるため、ホストへは公開しません。
 const serviceUrl = (
-  process.env.LOCAL_LLM_SERVICE_URL || 'http://translation-service:8000'
-).replace(/\/$/, '')
+  process.env.LOCAL_LLM_SERVICE_URL || "http://translation-service:8000"
+).replace(/\/$/, "");
 
 // ---- リクエスト検証スキーマ（Overleaf 公式の Validation.mjs 準拠） ----------
 
 const projectParams = z.strictObject({
   Project_id: zz.objectId(),
-})
+});
 const projectOnlySchema = z.object({
   params: projectParams,
-})
+});
 const translateSchema = z.object({
   params: projectParams,
   body: z.strictObject({
@@ -46,7 +46,7 @@ const translateSchema = z.object({
     text: z.string().min(1).max(500000),
     model: z.string().max(256).nullable().optional(),
   }),
-})
+});
 const settingsSchema = z.object({
   params: projectParams,
   body: z.strictObject({
@@ -55,7 +55,7 @@ const settingsSchema = z.object({
         z.strictObject({
           source: z.string().max(160),
           target: z.string().max(200),
-        })
+        }),
       )
       .max(200),
     model: z.string().max(256).nullable().optional(),
@@ -67,7 +67,7 @@ const settingsSchema = z.object({
       .nullable()
       .optional(),
   }),
-})
+});
 // 翻訳エンドポイントの保存 body（キーの空文字は作成時「なし」・更新時「変更なし」）。
 const endpointSchema = z.object({
   body: z.strictObject({
@@ -80,10 +80,10 @@ const endpointSchema = z.object({
     minimal_prompt: z.boolean().optional(),
     chunk_chars: z.number().int().min(200).max(200000).nullable().optional(),
   }),
-})
+});
 const endpointParamsSchema = z.object({
   params: z.strictObject({ Endpoint_id: z.string().regex(/^[a-f0-9]{16}$/) }),
-})
+});
 const modelsSchema = z.object({
   query: z.object({
     endpoint_id: z
@@ -91,7 +91,7 @@ const modelsSchema = z.object({
       .regex(/^[a-f0-9]{16}$/)
       .optional(),
   }),
-})
+});
 const endpointTestSchema = z.object({
   body: z.strictObject({
     base_url: z.string().min(1).max(500),
@@ -102,11 +102,11 @@ const endpointTestSchema = z.object({
       .optional(),
     clear_api_key: z.boolean().optional(),
   }),
-})
+});
 const docContentReadSchema = z.object({
   params: z.strictObject({ Project_id: zz.objectId() }),
   query: z.strictObject({ doc_id: zz.objectId() }),
-})
+});
 const docContentSaveSchema = z.object({
   params: z.strictObject({ Project_id: zz.objectId() }),
   body: z.strictObject({
@@ -114,19 +114,19 @@ const docContentSaveSchema = z.object({
     content: z.string().max(2 * 1024 * 1024),
     version: z.number().int().nonnegative(),
   }),
-})
+});
 
 // ID だけで document-updater を呼ばず、毎回このプロジェクト内の文書かを確認する。
 async function locateProjectDoc(projectId, docId) {
   const project = await ProjectGetter.promises.getProject(projectId, {
     rootFolder: true,
-  })
-  if (!project) return null
+  });
+  if (!project) return null;
   return await ProjectLocator.promises.findElement({
     project,
     element_id: docId,
-    type: 'doc',
-  })
+    type: "doc",
+  });
 }
 
 const englishDocumentSchema = z.object({
@@ -138,7 +138,7 @@ const englishDocumentSchema = z.object({
     content: z.string().max(500000),
     overwrite: z.boolean(),
   }),
-})
+});
 
 // ---- 翻訳サービスへの JSON 中継 --------------------------------------------
 
@@ -147,35 +147,35 @@ const englishDocumentSchema = z.object({
  * 翻訳サービスが停止していても Overleaf 本体は動くため、接続失敗は 503 と
  * 案内文で返し、エラーページやクラッシュにはしません。
  */
-async function proxy(req, res, { path, method = 'GET', body, projectId }) {
+async function proxy(req, res, { path, method = "GET", body, projectId }) {
   try {
     const response = await fetch(`${serviceUrl}${path}`, {
       method,
       headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
+        "Content-Type": "application/json",
+        Accept: "application/json",
       },
       body: body === undefined ? undefined : JSON.stringify(body),
-    })
+    });
     const payload = await response
       .json()
-      .catch(() => ({ detail: 'Invalid translation service response' }))
+      .catch(() => ({ detail: "Invalid translation service response" }));
     if (!response.ok) {
       logger.warn(
         { projectId, status: response.status },
-        'local LLM translation service returned an error'
-      )
+        "local LLM translation service returned an error",
+      );
     }
-    return res.status(response.status).json(payload)
+    return res.status(response.status).json(payload);
   } catch (error) {
     logger.warn(
       { projectId, err: error },
-      'local LLM translation service is unavailable'
-    )
+      "local LLM translation service is unavailable",
+    );
     return res.status(503).json({
       detail:
-        'Translation service is unavailable. Overleaf remains available; check the translation-service container and LOCAL_LLM_BASE_URL.',
-    })
+        "Translation service is unavailable. Overleaf remains available; check the translation-service container and LOCAL_LLM_BASE_URL.",
+    });
   }
 }
 
@@ -186,18 +186,18 @@ async function proxy(req, res, { path, method = 'GET', body, projectId }) {
  * disconnect で終わるため、クライアント切断でもブロックしません。
  */
 function waitForWritable(res) {
-  if (res.destroyed || res.writableEnded) return Promise.resolve()
-  return new Promise(resolve => {
+  if (res.destroyed || res.writableEnded) return Promise.resolve();
+  return new Promise((resolve) => {
     const finish = () => {
-      res.off('drain', finish)
-      res.off('close', finish)
-      res.off('error', finish)
-      resolve()
-    }
-    res.once('drain', finish)
-    res.once('close', finish)
-    res.once('error', finish)
-  })
+      res.off("drain", finish);
+      res.off("close", finish);
+      res.off("error", finish);
+      resolve();
+    };
+    res.once("drain", finish);
+    res.once("close", finish);
+    res.once("error", finish);
+  });
 }
 
 /**
@@ -208,77 +208,77 @@ function waitForWritable(res) {
  * 途中結果が確定・保存されないようにします。
  */
 async function streamTranslation(req, res, { path, body, projectId }) {
-  const abortController = new AbortController()
+  const abortController = new AbortController();
   const abortOnDisconnect = () => {
-    if (!res.writableEnded) abortController.abort()
-  }
-  res.once('close', abortOnDisconnect)
+    if (!res.writableEnded) abortController.abort();
+  };
+  res.once("close", abortOnDisconnect);
 
   try {
     const response = await fetch(`${serviceUrl}${path}`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        Accept: 'text/event-stream',
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
       },
       body: JSON.stringify(body),
       signal: abortController.signal,
-    })
+    });
 
     if (!response.ok) {
       // ストリーム開始前のエラー（検証失敗・モデル未選択など）は JSON で返します。
       const payload = await response
         .json()
-        .catch(() => ({ detail: 'Invalid translation service response' }))
+        .catch(() => ({ detail: "Invalid translation service response" }));
       logger.warn(
         { projectId, status: response.status },
-        'local LLM translation service returned an error'
-      )
-      return res.status(response.status).json(payload)
+        "local LLM translation service returned an error",
+      );
+      return res.status(response.status).json(payload);
     }
     if (!response.body) {
-      throw new Error('Translation service returned an empty response stream')
+      throw new Error("Translation service returned an empty response stream");
     }
 
     // SSE ヘッダーを送り、以降は受信片を待ってそのまま書き出します。
     res.status(200).set({
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    })
-    res.flushHeaders()
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    res.flushHeaders();
 
     for await (const chunk of response.body) {
       if (res.destroyed) {
         // ブラウザー切断を検知したら、上流（翻訳サービス）側も止めます。
-        abortController.abort()
-        return
+        abortController.abort();
+        return;
       }
-      if (!res.write(Buffer.from(chunk))) await waitForWritable(res)
+      if (!res.write(Buffer.from(chunk))) await waitForWritable(res);
     }
-    if (!res.destroyed) res.end()
+    if (!res.destroyed) res.end();
   } catch (error) {
-    if (abortController.signal.aborted || res.destroyed) return
+    if (abortController.signal.aborted || res.destroyed) return;
     logger.warn(
       { projectId, err: error },
-      'local LLM translation stream failed'
-    )
+      "local LLM translation stream failed",
+    );
     if (res.headersSent) {
       // ストリーム開始後の障害は、HTTP コードではなく SSE の error イベントで伝えます。
       res.write(
-        `data: ${JSON.stringify({ type: 'error', detail: 'Translation stream interrupted. Check the service logs and retry.' })}\n\n`
-      )
-      return res.end()
+        `data: ${JSON.stringify({ type: "error", detail: "Translation stream interrupted. Check the service logs and retry." })}\n\n`,
+      );
+      return res.end();
     }
     return res.status(503).json({
       detail:
-        'Translation service is unavailable. Overleaf remains available; check the translation-service container and LOCAL_LLM_BASE_URL.',
-    })
+        "Translation service is unavailable. Overleaf remains available; check the translation-service container and LOCAL_LLM_BASE_URL.",
+    });
   } finally {
     // ハンドラ終了時に未発生の中止があれば必ず起こし、上流リークを防ぎます。
-    res.off('close', abortOnDisconnect)
-    if (!abortController.signal.aborted) abortController.abort()
+    res.off("close", abortOnDisconnect);
+    if (!abortController.signal.aborted) abortController.abort();
   }
 }
 
@@ -287,33 +287,33 @@ async function streamTranslation(req, res, { path, body, projectId }) {
 export default {
   /** 管理画面用のリダイレクトを使わず、API の権限拒否を JSON の 403 で返します。 */
   requireSiteAdmin: expressify(async (req, res, next) => {
-    const userId = SessionManager.getLoggedInUserId(req.session)
+    const userId = SessionManager.getLoggedInUserId(req.session);
     if (!(await AuthorizationManager.promises.isUserSiteAdmin(userId))) {
       return res
         .status(403)
-        .json({ detail: '接続先の管理にはサイト管理者権限が必要です。' })
+        .json({ detail: "接続先の管理にはサイト管理者権限が必要です。" });
     }
-    next()
+    next();
   }),
 
   /** 翻訳サービスのモデル一覧をそのまま返します。 */
   getModels: expressify(async (req, res) => {
-    const { query } = parseReq(req, modelsSchema)
+    const { query } = parseReq(req, modelsSchema);
     const path = query.endpoint_id
       ? `/models?endpoint_id=${encodeURIComponent(query.endpoint_id)}`
-      : '/models'
-    return proxy(req, res, { path })
+      : "/models";
+    return proxy(req, res, { path });
   }),
 
   /** 翻訳エンドポイントの一覧を返します。 */
   getEndpoints: expressify(async (req, res) => {
-    return proxy(req, res, { path: '/endpoints' })
+    return proxy(req, res, { path: "/endpoints" });
   }),
 
   /** 翻訳エンドポイントを 1 件追加します。 */
   createEndpoint: expressify(async (req, res) => {
-    const { body } = parseReq(req, endpointSchema)
-    return proxy(req, res, { path: '/endpoints', method: 'POST', body })
+    const { body } = parseReq(req, endpointSchema);
+    return proxy(req, res, { path: "/endpoints", method: "POST", body });
   }),
 
   /** 翻訳エンドポイントを 1 件更新します。 */
@@ -323,102 +323,103 @@ export default {
       z.object({
         params: endpointParamsSchema.shape.params,
         body: endpointSchema.shape.body,
-      })
-    )
+      }),
+    );
     return proxy(req, res, {
       path: `/endpoints/${params.Endpoint_id}`,
-      method: 'PUT',
+      method: "PUT",
       body,
-    })
+    });
   }),
 
   /** 翻訳エンドポイントを 1 件削除します。 */
   deleteEndpoint: expressify(async (req, res) => {
-    const { params } = parseReq(req, endpointParamsSchema)
+    const { params } = parseReq(req, endpointParamsSchema);
     return proxy(req, res, {
       path: `/endpoints/${params.Endpoint_id}`,
-      method: 'DELETE',
-    })
+      method: "DELETE",
+    });
   }),
 
   /** 翻訳エンドポイントを標準に設定します。 */
   setEndpointDefault: expressify(async (req, res) => {
-    const { params } = parseReq(req, endpointParamsSchema)
+    const { params } = parseReq(req, endpointParamsSchema);
     return proxy(req, res, {
       path: `/endpoints/${params.Endpoint_id}/default`,
-      method: 'POST',
-    })
+      method: "POST",
+    });
   }),
 
   /** 標準エンドポイント指定を解除します。 */
   clearEndpointDefault: expressify(async (req, res) => {
-    return proxy(req, res, { path: '/endpoints/default/clear', method: 'POST' })
+    return proxy(req, res, {
+      path: "/endpoints/default/clear",
+      method: "POST",
+    });
   }),
 
   /** 保存せずに接続を確認します。保存済みキーの利用判断は翻訳サービスが行います。 */
   testEndpoint: expressify(async (req, res) => {
-    const { body } = parseReq(req, endpointTestSchema)
-    return proxy(req, res, { path: '/endpoints/test', method: 'POST', body })
+    const { body } = parseReq(req, endpointTestSchema);
+    return proxy(req, res, { path: "/endpoints/test", method: "POST", body });
   }),
 
   /** プロジェクトの翻訳設定を取得します。 */
   getSettings: expressify(async (req, res) => {
-    const { params } = parseReq(req, projectOnlySchema)
+    const { params } = parseReq(req, projectOnlySchema);
     return proxy(req, res, {
       path: `/projects/${params.Project_id}/settings`,
       projectId: params.Project_id,
-    })
+    });
   }),
 
   /** プロジェクトの翻訳設定を保存します。 */
   putSettings: expressify(async (req, res) => {
-    const { params, body } = parseReq(req, settingsSchema)
+    const { params, body } = parseReq(req, settingsSchema);
     return proxy(req, res, {
       path: `/projects/${params.Project_id}/settings`,
       projectId: params.Project_id,
-      method: 'PUT',
+      method: "PUT",
       body,
-    })
+    });
   }),
 
   /** 翻訳を開始し、SSE を中継します。 */
   translate: expressify(async (req, res) => {
-    const { params, body } = parseReq(req, translateSchema)
-    const payload = { ...body }
-    if (process.env.LLM_ENABLED === 'true') {
+    const { params, body } = parseReq(req, translateSchema);
+    const payload = { ...body };
+    if (process.env.LLM_ENABLED === "true") {
       // キーは本人の設定からサーバー側だけで解決します。ブラウザー由来の
       // 接続URL・キーはスキーマで受け付けず、既存の認証済み中継を使います。
       try {
         const { resolveTranslationOverride } =
-          await import('../../../llm/app/src/LLMSettingsController.mjs')
+          await import("../../../llm/app/src/LLMSettingsController.mjs");
         const override = await resolveTranslationOverride(
-          SessionManager.getLoggedInUserId(req.session)
-        )
+          SessionManager.getLoggedInUserId(req.session),
+        );
         if (override) {
-          payload.llm_base_url = override.baseUrl
-          payload.llm_api_key = override.apiKey
-          payload.llm_minimal_prompt = override.minimal
+          payload.llm_base_url = override.baseUrl;
+          payload.llm_api_key = override.apiKey;
+          payload.llm_minimal_prompt = override.minimal;
           payload.llm_chunk_chars =
-            override.chunkChars >= 200 ? override.chunkChars : null
-          if (override.model) payload.model = override.model
+            override.chunkChars >= 200 ? override.chunkChars : null;
+          // パネル（プロジェクト設定）のモデル指定が無いときだけ設定欄のモデルを使う。
+          if (!payload.model && override.model) payload.model = override.model;
         }
       } catch (error) {
-        // 削除済み接続先や設定取得エラーで、別のモデルへ原文を送らないよう止めます。
-        return res
-          .status(error.status || 503)
-          .json({
-            message:
-              error.status === 409
-                ? error.message
-                : '翻訳用の接続設定を取得できませんでした。もう一度お試しください。',
-          })
+        // 解決失敗で翻訳が止まらないよう、警告だけ出して標準チェーンに落とす
+        // （fork 準拠）。接続系は翻訳パネルの接続先選択で修正できる。
+        logger.warn(
+          { projectId: params.Project_id, err: error },
+          "local LLM translation override resolution failed; using service defaults",
+        );
       }
     }
     return streamTranslation(req, res, {
       path: `/projects/${params.Project_id}/translate`,
       projectId: params.Project_id,
       body: payload,
-    })
+    });
   }),
 
   /**
@@ -429,31 +430,31 @@ export default {
    * 日本語原文には一切触れません。
    */
   getDocContent: expressify(async (req, res) => {
-    const { params, query } = parseReq(req, docContentReadSchema)
+    const { params, query } = parseReq(req, docContentReadSchema);
     if (!(await locateProjectDoc(params.Project_id, query.doc_id)))
-      return res.sendStatus(404)
+      return res.sendStatus(404);
     // Mongo の定期保存を待たず、編集中の最新本文と版を取得する。
     const doc = await DocumentUpdaterHandler.promises.getDocument(
       params.Project_id,
       query.doc_id,
-      -1
-    )
-    return res.json({ content: doc.lines.join('\n'), version: doc.version })
+      -1,
+    );
+    return res.json({ content: doc.lines.join("\n"), version: doc.version });
   }),
 
   saveDocContent: expressify(async (req, res) => {
-    const { params, body } = parseReq(req, docContentSaveSchema)
+    const { params, body } = parseReq(req, docContentSaveSchema);
     if (!(await locateProjectDoc(params.Project_id, body.doc_id)))
-      return res.sendStatus(404)
+      return res.sendStatus(404);
     try {
       const result = await DocumentUpdaterHandler.promises.setDocumentIfVersion(
         params.Project_id,
         body.doc_id,
         SessionManager.getLoggedInUserId(req.session),
-        body.content.split('\n'),
-        body.version
-      )
-      return res.json(result)
+        body.content.split("\n"),
+        body.version,
+      );
+      return res.json(result);
     } catch (error) {
       if (
         error.response?.statusCode === 409 ||
@@ -461,21 +462,21 @@ export default {
       ) {
         return res.status(409).json({
           detail:
-            '別の場所で文書が更新されています。編集中の内容をコピーしてから、再読込してください。',
-        })
+            "別の場所で文書が更新されています。編集中の内容をコピーしてから、再読込してください。",
+        });
       }
-      throw error
+      throw error;
     }
   }),
 
   saveEnglishDocument: expressify(async (req, res) => {
     // 新設 API は検証失敗を拒否します。ログだけで不正入力を通しません。
-    const { params, body } = parseReq(req, englishDocumentSchema)
+    const { params, body } = parseReq(req, englishDocumentSchema);
     const project = await ProjectGetter.promises.getProject(params.Project_id, {
       rootFolder: true,
-    })
+    });
     if (!project) {
-      return res.sendStatus(404)
+      return res.sendStatus(404);
     }
 
     // 翻訳元ドキュメントの現在位置を検証し、要求内容と食い違っていれば拒否します。
@@ -483,80 +484,82 @@ export default {
       await ProjectLocator.promises.findElement({
         project,
         element_id: body.source_doc_id,
-        type: 'doc',
-      })
-    const sourceName = sourceDoc.name
+        type: "doc",
+      });
+    const sourceName = sourceDoc.name;
     if (
-      !sourceName.toLowerCase().endsWith('.tex') ||
-      sourceName.toLowerCase().endsWith('.en.tex')
+      !sourceName.toLowerCase().endsWith(".tex") ||
+      sourceName.toLowerCase().endsWith(".en.tex")
     ) {
       return res.status(400).json({
-        detail: '日本語版の .tex ファイルを翻訳元として指定してください。',
-      })
+        detail: "日本語版の .tex ファイルを翻訳元として指定してください。",
+      });
     }
-    const englishName = `${sourceName.slice(0, -4)}.en.tex`
+    const englishName = `${sourceName.slice(0, -4)}.en.tex`;
     if (
       folder._id.toString() !== body.parent_folder_id.toString() ||
       body.name !== englishName
     ) {
       return res.status(409).json({
         detail:
-          '翻訳元ファイルの場所が変わりました。ファイルツリーを更新して再度保存してください。',
-      })
+          "翻訳元ファイルの場所が変わりました。ファイルツリーを更新して再度保存してください。",
+      });
     }
     // 英語版名の衝突を種類ごとに確認します（ファイル・フォルダー同名は作成不可）。
-    const existingDoc = folder.docs.find(doc => doc.name === englishName)
-    const existingFile = folder.fileRefs.find(file => file.name === englishName)
+    const existingDoc = folder.docs.find((doc) => doc.name === englishName);
+    const existingFile = folder.fileRefs.find(
+      (file) => file.name === englishName,
+    );
     const existingFolder = folder.folders.find(
-      candidate => candidate.name === englishName
-    )
+      (candidate) => candidate.name === englishName,
+    );
     if (existingFile) {
       return res.status(409).json({
         detail: `${englishName} と同名の通常ファイルがあるため、英語版文書として保存できません。`,
-      })
+      });
     }
     if (existingFolder) {
       return res.status(409).json({
         detail: `${englishName} と同名のフォルダーがあるため、英語版文書として保存できません。`,
-      })
+      });
     }
     if (existingDoc && !body.overwrite) {
       return res.status(409).json({
         detail:
-          '英語版文書が既にあります。上書きを確認してから再実行してください。',
-      })
+          "英語版文書が既にあります。上書きを確認してから再実行してください。",
+      });
     }
     if (!existingDoc && body.overwrite) {
       return res.status(409).json({
         detail:
-          '上書き対象の英語版文書が見つかりません。もう一度保存してください。',
-      })
+          "上書き対象の英語版文書が見つかりません。もう一度保存してください。",
+      });
     }
 
     // 実際の保存は Overleaf 本体の通常経路（addDoc / upsertDoc）を通すため、
     // リアルタイム同期・履歴・ファイルツリー更新が正しく働きます。
-    const userId = SessionManager.getLoggedInUserId(req.session)
-    const contentLines = body.content.split('\n')
-    let doc
+    const userId = SessionManager.getLoggedInUserId(req.session);
+    const contentLines = body.content.split("\n");
+    let doc;
     if (existingDoc) {
       doc = await EditorController.promises.upsertDoc(
         params.Project_id,
         folder._id,
         englishName,
         contentLines,
-        'local-llm-translation',
-        userId
-      )
+        "local-llm-translation",
+        userId,
+      );
     } else {
       doc = await EditorController.promises.addDoc(
         params.Project_id,
         folder._id,
         englishName,
         contentLines,
-        'local-llm-translation',
-        userId
-      )
+        "local-llm-translation",
+        userId,
+      );
     }
-    return res.json({ doc, name: englishName })
+    return res.json({ doc, name: englishName });
   }),
-}
+};

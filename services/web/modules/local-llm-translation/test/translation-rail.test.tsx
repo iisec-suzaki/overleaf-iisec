@@ -90,12 +90,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("guides the user when no editor exists or the project is read-only", () => {
+it("keeps the translation panel usable for read-only projects (fork parity)", () => {
   const result = render(<TranslationPanel />);
   expect(screen.getByText(/\.tex ファイルをエディターで開いて/)).toBeTruthy();
   mock.write = false;
   result.rerender(<TranslationPanel />);
-  expect(screen.getByText(/編集権限が必要/)).toBeTruthy();
+  // 閲覧専用でも翻訳は開始できる（保存系はボタン側で制御）。権限案内のみ表示。
+  expect(screen.queryByText(/編集権限が必要/)).toBeNull();
+  expect(screen.getByText(/\.tex ファイルをエディターで開いて/)).toBeTruthy();
 });
 it("retains preview state while loading, switching documents and closing the editor", () => {
   const first = editor();

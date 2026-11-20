@@ -277,8 +277,7 @@ export default function TranslationToolbar({
     [],
   );
 
-  // 本文を書き換える操作を含むため、サーバーと同じ書き込み権限を要求します。
-  if (!isLatex || !permissions.write) return null;
+  if (!isLatex) return null;
 
   /** 用語集・モデル・文体メモをプロジェクト設定として保存します。 */
   const saveSettings = async (promptOverride?: string) => {
@@ -702,6 +701,12 @@ export default function TranslationToolbar({
                   : bodyStyle
               }
             >
+              {!permissions.write && (
+                <p role="status">
+                  閲覧専用のため翻訳の実行だけできます。用語集や訳文の保存は、
+                  編集権限のあるメンバーに依頼してください。
+                </p>
+              )}
               {getMeta("ol-ExposedSettings")?.llmEnabled && (
                 <p>
                   <a href="/user/llm-settings" target="_blank" rel="noreferrer">

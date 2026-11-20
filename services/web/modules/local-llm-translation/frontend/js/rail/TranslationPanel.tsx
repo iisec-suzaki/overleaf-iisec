@@ -6,7 +6,6 @@ import {
 } from "@/features/source-editor/components/codemirror-context";
 import { useEditorOpenDocContext } from "@/features/ide-react/context/editor-open-doc-context";
 import { useEditorManagerContext } from "@/features/ide-react/context/editor-manager-context";
-import { usePermissionsContext } from "@/features/ide-react/context/permissions-context";
 import { useProjectContext } from "@/shared/context/project-context";
 import withErrorBoundary from "@/infrastructure/error-boundary";
 import PanelErrorFallback from "../panel-error-fallback";
@@ -27,7 +26,6 @@ function ProjectTranslationPanel() {
   const editor = useSyncExternalStore(subscribeBridgedEditor, getBridgedEditor);
   const { currentDocumentId } = useEditorOpenDocContext();
   const manager = useEditorManagerContext();
-  const permissions = usePermissionsContext();
   const lastEditor = useRef<BridgedEditor | null>(null);
   const available = Boolean(
     editor &&
@@ -41,8 +39,6 @@ function ProjectTranslationPanel() {
   }, [available, editor]);
   const retained = available ? editor : lastEditor.current;
 
-  if (!permissions.write)
-    return <p className="p-3">翻訳にはプロジェクトの編集権限が必要です。</p>;
   if (!retained)
     return (
       <p className="p-3">
