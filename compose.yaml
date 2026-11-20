@@ -38,6 +38,10 @@ services:
       # 空欄なら既定のフッター表記。
       OVERLEAF_RIGHT_FOOTER: ${OVERLEAF_RIGHT_FOOTER:-}
       OVERLEAF_INVITE_TOKEN_SECRET: ${OVERLEAF_INVITE_TOKEN_SECRET:?Set OVERLEAF_INVITE_TOKEN_SECRET in .env}
+      # ブラウザのクッキーはポートを区別しないため、同じホストで運用する
+      # fork ステーション(8081, overleaf.sid)とセッションが衝突しないよう
+      # このスタックだけ別名にする。未指定なら overleaf.sid。
+      COOKIE_NAME: ${COOKIE_NAME:-overleaf-iisec.sid}
       OVERLEAF_MONGO_URL: mongodb://mongo/sharelatex?replicaSet=overleaf
       OVERLEAF_REDIS_HOST: redis
       REDIS_HOST: redis
