@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, expect, it, vi } from 'vitest'
+import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import {
   act,
   cleanup,
@@ -6,538 +6,583 @@ import {
   render,
   screen,
   waitFor,
-} from '@testing-library/react'
-import { EditorView } from '@codemirror/view'
-import { undo } from '@codemirror/commands'
-import SplitLauncherPanel from '../frontend/js/rail/SplitLauncherPanel'
-import BilingualEditorPanel from '../frontend/js/split/BilingualEditorPanel'
-import { collectTexDocs } from '../frontend/js/split/tex-docs'
+} from "@testing-library/react";
+import { EditorView } from "@codemirror/view";
+import { undo } from "@codemirror/commands";
+import * as commands from "@/features/source-editor/extensions/toolbar/commands";
+import SplitLauncherPanel from "../frontend/js/rail/SplitLauncherPanel";
+import BilingualEditorPanel from "../frontend/js/split/BilingualEditorPanel";
+import { collectTexDocs } from "../frontend/js/split/tex-docs";
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(),
   put: vi.fn(),
-  main: 'jp',
+  main: "jp",
   write: true,
-  tabs: [{ id: 'jp' }, { id: 'en' }] as { id: string }[],
+  tabs: [{ id: "jp" }, { id: "en" }] as { id: string }[],
   closeMain: vi.fn(),
   openMain: vi.fn(),
-}))
+}));
 const tree = {
-  _id: 'root',
-  name: '',
+  _id: "root",
+  name: "",
   docs: [
-    { _id: 'jp', name: 'main.tex' },
-    { _id: 'en', name: 'main.en.tex' },
+    { _id: "jp", name: "main.tex" },
+    { _id: "en", name: "main.en.tex" },
   ],
   folders: [
     {
-      _id: 'nested',
-      name: 'chapters',
+      _id: "nested",
+      name: "chapters",
       docs: [
-        { _id: 'chapter', name: 'INTRO.TEX' },
-        { _id: 'bib', name: 'ref.bib' },
+        { _id: "chapter", name: "INTRO.TEX" },
+        { _id: "bib", name: "ref.bib" },
       ],
       folders: [],
       fileRefs: [],
     },
   ],
   fileRefs: [],
-}
+};
 // エラー境界は Sentry 設定を参照するため、テストでは素通しにする。
-vi.mock('@/infrastructure/error-boundary', () => ({
+vi.mock("@/infrastructure/error-boundary", () => ({
   default: (component: unknown) => component,
-}))
-vi.mock('@/shared/context/project-context', () => ({
-  useProjectContext: () => ({ projectId: 'project' }),
-}))
-vi.mock('@/shared/context/file-tree-data-context', () => ({
+}));
+// 公式ツールバーは babel マクロ等の重い依存を引くため、テストでは素通しする。
+vi.mock("@/features/source-editor/components/codemirror-toolbar", () => ({
+  CodeMirrorToolbar: () => null,
+}));
+vi.mock("@/features/review-panel/context/review-panel-providers", () => ({
+  ReviewPanelProviders: ({ children }: { children: React.ReactNode }) =>
+    children,
+}));
+vi.mock("@/shared/context/project-context", () => ({
+  useProjectContext: () => ({ projectId: "project" }),
+}));
+vi.mock("@/shared/context/file-tree-data-context", () => ({
   useFileTreeData: () => ({ fileTreeData: tree }),
-}))
-vi.mock('@/features/ide-react/context/editor-open-doc-context', () => ({
+}));
+vi.mock("@/features/ide-react/context/editor-open-doc-context", () => ({
   useEditorOpenDocContext: () => ({ currentDocumentId: mocks.main }),
-}))
-vi.mock('@/features/ide-react/context/permissions-context', () => ({
+}));
+vi.mock("@/features/ide-react/context/editor-manager-context", () => ({
+  useEditorManagerContext: () => ({ getCurrentDocumentId: () => mocks.main }),
+}));
+vi.mock("@/features/ide-react/context/permissions-context", () => ({
   usePermissionsContext: () => ({ write: mocks.write }),
-}))
-vi.mock('@/shared/context/user-settings-context', () => ({
+}));
+vi.mock("@/shared/context/user-settings-context", () => ({
   useUserSettingsContext: () => ({
-    userSettings: { fontSize: 12, fontFamily: 'monaco', lineHeight: 'normal' },
+    userSettings: { fontSize: 12, fontFamily: "monaco", lineHeight: "normal" },
   }),
-}))
-vi.mock('@/shared/hooks/use-active-overall-theme', () => ({
-  useActiveOverallTheme: () => 'light',
-}))
-vi.mock('@/shared/hooks/use-active-editor-theme', () => ({
-  useActiveEditorTheme: () => 'textmate',
-}))
-vi.mock('@/features/source-editor/extensions/theme', () => ({
+}));
+vi.mock("@/shared/hooks/use-active-overall-theme", () => ({
+  useActiveOverallTheme: () => "light",
+}));
+vi.mock("@/shared/hooks/use-active-editor-theme", () => ({
+  useActiveEditorTheme: () => "textmate",
+}));
+vi.mock("@/features/source-editor/extensions/theme", () => ({
   theme: () => [],
   setEditorTheme: async () => ({}),
   setOptionsTheme: () => ({}),
-}))
-vi.mock('@/features/source-editor/extensions/language', () => ({
+}));
+vi.mock("@/features/source-editor/extensions/language", () => ({
   language: () => [],
-}))
+}));
 vi.mock(
-  '@/features/ide-react/components/resize/horizontal-resize-handle',
-  () => ({ HorizontalResizeHandle: () => null })
-)
-vi.mock('react-resizable-panels', () => ({
+  "@/features/ide-react/components/resize/horizontal-resize-handle",
+  () => ({ HorizontalResizeHandle: () => null }),
+);
+vi.mock("react-resizable-panels", () => ({
   Panel: ({ children }: { children: React.ReactNode }) => (
     <section>{children}</section>
   ),
-}))
-vi.mock('@/infrastructure/fetch-json', () => ({
+}));
+vi.mock("@/infrastructure/fetch-json", () => ({
   getJSON: mocks.get,
   putJSON: mocks.put,
-}))
+}));
 
-vi.mock('@/features/ide-react/context/tabs-context', () => ({
-  TAB_TRANSFER_TYPE: 'text/x.tab-id',
+vi.mock("@/features/ide-react/context/tabs-context", () => ({
+  TAB_TRANSFER_TYPE: "text/x.tab-id",
   useTabsContext: () => ({
     tabs: mocks.tabs,
     closeTab: mocks.closeMain,
     openTab: mocks.openMain,
   }),
-}))
-vi.mock('react-i18next', () => ({
+}));
+vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, fallback?: string) => fallback || key,
   }),
-}))
-vi.mock('@/features/source-editor/extensions/visual/visual', () => ({
+}));
+vi.mock("@/features/source-editor/extensions/visual/visual", () => ({
   isVisual: () => false,
-}))
-vi.mock('@/infrastructure/event-tracking', () => ({ sendMB: () => {} }))
-vi.mock('@/shared/components/material-icon', () => ({ default: () => null }))
-vi.mock('@/shared/components/ol/ol-tooltip', () => ({
+}));
+vi.mock("@/infrastructure/event-tracking", () => ({ sendMB: () => {} }));
+vi.mock("@/shared/components/material-icon", () => ({ default: () => null }));
+vi.mock("@/shared/components/ol/ol-tooltip", () => ({
   default: ({ children }: any) => children,
-}))
+}));
 beforeEach(() => {
-  localStorage.clear()
-  mocks.main = 'jp'
-  mocks.write = true
-  mocks.tabs = [{ id: 'jp' }, { id: 'en' }]
-  mocks.openMain.mockResolvedValue(undefined)
-  mocks.closeMain.mockResolvedValue(undefined)
-  mocks.get.mockResolvedValue({ content: 'English before', version: 5 })
-  mocks.put.mockResolvedValue({ version: 6 })
-  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  localStorage.clear();
+  mocks.main = "jp";
+  mocks.write = true;
+  mocks.tabs = [{ id: "jp" }, { id: "en" }];
+  mocks.openMain.mockResolvedValue(undefined);
+  mocks.closeMain.mockResolvedValue(undefined);
+  mocks.get.mockResolvedValue({ content: "English before", version: 5 });
+  mocks.put.mockResolvedValue({ version: 6 });
+  vi.spyOn(window, "confirm").mockReturnValue(true);
   // jsdom には描画レイアウトがないが、実際の CM の変更処理・undo はそのまま使う。
-  Range.prototype.getClientRects = () => [] as unknown as DOMRectList
-  Range.prototype.getBoundingClientRect = () => new DOMRect()
-})
+  Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  Range.prototype.getBoundingClientRect = () => new DOMRect();
+});
 afterEach(() => {
-  cleanup()
-  vi.restoreAllMocks()
-  vi.resetAllMocks()
-  vi.useRealTimers()
-})
+  cleanup();
+  vi.restoreAllMocks();
+  vi.resetAllMocks();
+  vi.useRealTimers();
+});
 function open() {
-  const result = render(<BilingualEditorPanel />)
+  const result = render(<BilingualEditorPanel />);
   act(() => {
-    window.dispatchEvent(new Event('overleaf:open-bilingual-editor'))
-  })
-  return result
+    window.dispatchEvent(new Event("overleaf:open-bilingual-editor"));
+  });
+  return result;
 }
 async function editor() {
   return EditorView.findFromDOM(
-    await screen.findByRole('textbox', { name: '横並びエディター' })
-  )!
+    await screen.findByRole("textbox", { name: "横並びエディター" }),
+  )!;
 }
 function replace(view: EditorView, text: string) {
   act(() =>
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: text },
-    })
-  )
+    }),
+  );
 }
 const saveButton = () =>
-  screen.getByRole('button', {
-    name: '横並びの変更を保存',
-  }) as HTMLButtonElement
+  screen.getByRole("button", {
+    name: "横並びの変更を保存",
+  }) as HTMLButtonElement;
 
-it('lists nested .tex documents using the official Folder shape', () => {
-  expect(collectTexDocs({ ...tree, name: 'rootFolder' })).toEqual([
-    { id: 'jp', name: 'main.tex', path: 'main.tex' },
-    { id: 'en', name: 'main.en.tex', path: 'main.en.tex' },
-    { id: 'chapter', name: 'INTRO.TEX', path: 'chapters/INTRO.TEX' },
-  ])
-})
-it('chooses the English companion and saves against the version from the read', async () => {
-  open()
-  const view = await editor()
-  replace(view, 'English edited')
+it("lists nested .tex documents using the official Folder shape", () => {
+  expect(collectTexDocs({ ...tree, name: "rootFolder" })).toEqual([
+    { id: "jp", name: "main.tex", path: "main.tex" },
+    { id: "en", name: "main.en.tex", path: "main.en.tex" },
+    { id: "chapter", name: "INTRO.TEX", path: "chapters/INTRO.TEX" },
+  ]);
+});
+it("chooses the English companion and saves against the version from the read", async () => {
+  open();
+  const view = await editor();
+  replace(view, "English edited");
   expect(
     (
-      screen.getByRole('combobox', {
-        name: '横並びで開く .tex',
+      screen.getByRole("combobox", {
+        name: "横並びで開く .tex",
       }) as HTMLSelectElement
-    ).value
-  ).toBe('en')
-  fireEvent.click(saveButton())
+    ).value,
+  ).toBe("en");
+  fireEvent.click(saveButton());
   await waitFor(() =>
     expect(mocks.put).toHaveBeenCalledWith(
-      '/project/project/local-llm/doc-content',
-      { body: { doc_id: 'en', content: 'English edited', version: 5 } }
-    )
-  )
-  await screen.findByText('保存しました。')
-  expect(saveButton().disabled).toBe(true)
-})
-it('keeps local edits and the previous version when MCP or another editor wins', async () => {
+      "/project/project/local-llm/doc-content",
+      { body: { doc_id: "en", content: "English edited", version: 5 } },
+    ),
+  );
+  await screen.findByText("保存しました。");
+  expect(saveButton().disabled).toBe(true);
+});
+it("keeps local edits and the previous version when MCP or another editor wins", async () => {
   mocks.put.mockRejectedValue({
-    data: { detail: '別の場所で更新されています。' },
-  })
-  open()
-  const view = await editor()
-  replace(view, 'Local draft')
-  fireEvent.click(saveButton())
-  await screen.findByRole('alert')
-  expect(view.state.doc.toString()).toBe('Local draft')
-  expect(saveButton().disabled).toBe(false)
-  vi.mocked(window.confirm).mockReturnValue(false)
-  fireEvent.click(screen.getByRole('button', { name: '再読込' }))
-  expect(view.state.doc.toString()).toBe('Local draft')
-  expect(mocks.get).toHaveBeenCalledTimes(1)
-})
-it('retains edits made during a save and uses the returned version next time', async () => {
-  let resolve!: (value: { version: number }) => void
+    data: { detail: "別の場所で更新されています。" },
+  });
+  open();
+  const view = await editor();
+  replace(view, "Local draft");
+  fireEvent.click(saveButton());
+  await screen.findByRole("alert");
+  expect(view.state.doc.toString()).toBe("Local draft");
+  expect(saveButton().disabled).toBe(false);
+  vi.mocked(window.confirm).mockReturnValue(false);
+  fireEvent.click(screen.getByRole("button", { name: "再読込" }));
+  expect(view.state.doc.toString()).toBe("Local draft");
+  expect(mocks.get).toHaveBeenCalledTimes(1);
+});
+it("retains edits made during a save and uses the returned version next time", async () => {
+  let resolve!: (value: { version: number }) => void;
   mocks.put.mockReturnValueOnce(
-    new Promise(yes => {
-      resolve = yes
-    })
-  )
-  open()
-  const view = await editor()
-  replace(view, 'first edit')
-  fireEvent.click(saveButton())
-  replace(view, 'second edit')
+    new Promise((yes) => {
+      resolve = yes;
+    }),
+  );
+  open();
+  const view = await editor();
+  replace(view, "first edit");
+  fireEvent.click(saveButton());
+  replace(view, "second edit");
   await act(async () => {
-    resolve({ version: 6 })
-  })
-  expect(saveButton().disabled).toBe(false)
-  fireEvent.click(saveButton())
+    resolve({ version: 6 });
+  });
+  expect(saveButton().disabled).toBe(false);
+  fireEvent.click(saveButton());
   await waitFor(() =>
     expect(mocks.put).toHaveBeenLastCalledWith(
-      '/project/project/local-llm/doc-content',
-      { body: { doc_id: 'en', content: 'second edit', version: 6 } }
-    )
-  )
-})
-it('makes the side view read-only when main opens it or write permission is lost', async () => {
-  const result = open()
-  const view = await editor()
-  replace(view, 'Local draft')
-  mocks.main = 'en'
-  result.rerender(<BilingualEditorPanel />)
-  expect(view.contentDOM.getAttribute('contenteditable')).toBe('false')
-  expect(saveButton().disabled).toBe(true)
-  mocks.main = 'jp'
-  mocks.write = false
-  result.rerender(<BilingualEditorPanel />)
-  expect(view.contentDOM.getAttribute('contenteditable')).toBe('false')
-  expect(saveButton().disabled).toBe(true)
-})
-it('discards a late read after closing and reopening the panel', async () => {
-  let resolve!: (value: { content: string; version: number }) => void
+      "/project/project/local-llm/doc-content",
+      { body: { doc_id: "en", content: "second edit", version: 6 } },
+    ),
+  );
+});
+it("makes the side view read-only when main opens it or write permission is lost", async () => {
+  const result = open();
+  const view = await editor();
+  replace(view, "Local draft");
+  mocks.main = "en";
+  result.rerender(<BilingualEditorPanel />);
+  expect(view.contentDOM.getAttribute("contenteditable")).toBe("false");
+  expect(saveButton().disabled).toBe(true);
+  mocks.main = "jp";
+  mocks.write = false;
+  result.rerender(<BilingualEditorPanel />);
+  expect(view.contentDOM.getAttribute("contenteditable")).toBe("false");
+  expect(saveButton().disabled).toBe(true);
+});
+it("discards a late read after closing and reopening the panel", async () => {
+  let resolve!: (value: { content: string; version: number }) => void;
   mocks.get.mockReturnValueOnce(
-    new Promise(yes => {
-      resolve = yes
-    })
-  )
-  open()
-  fireEvent.click(screen.getByRole('button', { name: '横並びを閉じる' }))
+    new Promise((yes) => {
+      resolve = yes;
+    }),
+  );
+  open();
+  fireEvent.click(screen.getByRole("button", { name: "横並びを閉じる" }));
   act(() => {
-    window.dispatchEvent(new Event('overleaf:open-bilingual-editor'))
-  })
-  const view = await editor()
+    window.dispatchEvent(new Event("overleaf:open-bilingual-editor"));
+  });
+  const view = await editor();
   await act(async () => {
-    resolve({ content: 'Stale read', version: 1 })
-  })
-  expect(view.state.doc.toString()).toBe('English before')
-  expect(mocks.get.mock.calls[0][1].signal.aborted).toBe(true)
-})
+    resolve({ content: "Stale read", version: 1 });
+  });
+  expect(view.state.doc.toString()).toBe("English before");
+  expect(mocks.get.mock.calls[0][1].signal.aborted).toBe(true);
+});
 
-it('clears the navigation warning after explicitly discarding a closed panel', async () => {
-  open()
-  const view = await editor()
-  replace(view, 'Discarded draft')
-  const before = new Event('beforeunload', { cancelable: true })
-  window.dispatchEvent(before)
-  expect(before.defaultPrevented).toBe(true)
-  fireEvent.click(screen.getByRole('button', { name: '横並びを閉じる' }))
-  const after = new Event('beforeunload', { cancelable: true })
-  window.dispatchEvent(after)
-  expect(after.defaultPrevented).toBe(false)
-  expect(screen.queryByRole('textbox', { name: '横並びエディター' })).toBeNull()
-})
+it("clears the navigation warning after explicitly discarding a closed panel", async () => {
+  open();
+  const view = await editor();
+  replace(view, "Discarded draft");
+  const before = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(before);
+  expect(before.defaultPrevented).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "横並びを閉じる" }));
+  const after = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(after);
+  expect(after.defaultPrevented).toBe(false);
+  expect(
+    screen.queryByRole("textbox", { name: "横並びエディター" }),
+  ).toBeNull();
+});
 
-it('keeps separate document content and undo history while switching tabs', async () => {
-  open()
-  const english = await editor()
-  replace(english, 'English draft')
+it("keeps separate document content and undo history while switching tabs", async () => {
+  open();
+  const english = await editor();
+  replace(english, "English draft");
   fireEvent.change(
-    screen.getByRole('combobox', { name: '横並びで開く .tex' }),
+    screen.getByRole("combobox", { name: "横並びで開く .tex" }),
     {
-      target: { value: 'chapter' },
-    }
-  )
-  const chapter = await editor()
-  replace(chapter, 'Chapter draft')
-  fireEvent.click(screen.getByRole('tab', { name: 'main.en.tex' }))
-  expect(await editor()).toBe(english)
-  expect(english.state.doc.toString()).toBe('English draft')
+      target: { value: "chapter" },
+    },
+  );
+  const chapter = await editor();
+  replace(chapter, "Chapter draft");
+  fireEvent.click(screen.getByRole("tab", { name: "main.en.tex" }));
+  expect(await editor()).toBe(english);
+  expect(english.state.doc.toString()).toBe("English draft");
   act(() => {
-    undo(english)
-  })
-  expect(english.state.doc.toString()).toBe('English before')
-  fireEvent.click(screen.getByRole('tab', { name: 'chapters/INTRO.TEX' }))
-  expect(await editor()).toBe(chapter)
-  expect(chapter.state.doc.toString()).toBe('Chapter draft')
-  expect(mocks.get).toHaveBeenCalledTimes(2)
-})
-it('confirms discarding a tab but allows switching without discarding', async () => {
-  open()
-  const english = await editor()
-  replace(english, 'Unsaved English')
+    undo(english);
+  });
+  expect(english.state.doc.toString()).toBe("English before");
+  fireEvent.click(screen.getByRole("tab", { name: "chapters/INTRO.TEX" }));
+  expect(await editor()).toBe(chapter);
+  expect(chapter.state.doc.toString()).toBe("Chapter draft");
+  expect(mocks.get).toHaveBeenCalledTimes(2);
+});
+it("confirms discarding a tab but allows switching without discarding", async () => {
+  open();
+  const english = await editor();
+  replace(english, "Unsaved English");
   fireEvent.change(
-    screen.getByRole('combobox', { name: '横並びで開く .tex' }),
+    screen.getByRole("combobox", { name: "横並びで開く .tex" }),
     {
-      target: { value: 'chapter' },
-    }
-  )
-  await editor()
-  expect(window.confirm).not.toHaveBeenCalled()
-  vi.mocked(window.confirm).mockReturnValue(false)
+      target: { value: "chapter" },
+    },
+  );
+  await editor();
+  expect(window.confirm).not.toHaveBeenCalled();
+  vi.mocked(window.confirm).mockReturnValue(false);
   fireEvent.click(
-    screen.getByRole('button', { name: 'main.en.tex のタブを閉じる' })
-  )
-  expect(screen.getByRole('tab', { name: 'main.en.tex' })).toBeTruthy()
-  vi.mocked(window.confirm).mockReturnValue(true)
+    screen.getByRole("button", { name: "main.en.tex のタブを閉じる" }),
+  );
+  expect(screen.getByRole("tab", { name: "main.en.tex" })).toBeTruthy();
+  vi.mocked(window.confirm).mockReturnValue(true);
   fireEvent.click(
-    screen.getByRole('button', { name: 'main.en.tex のタブを閉じる' })
-  )
-  expect(screen.queryByRole('tab', { name: 'main.en.tex' })).toBeNull()
-  expect(screen.getByRole('tab', { name: 'chapters/INTRO.TEX' })).toBeTruthy()
-})
-it('restores tab IDs and active tab without storing unsaved document text', async () => {
-  const result = open()
-  replace(await editor(), 'Private unsaved text')
+    screen.getByRole("button", { name: "main.en.tex のタブを閉じる" }),
+  );
+  expect(screen.queryByRole("tab", { name: "main.en.tex" })).toBeNull();
+  expect(screen.getByRole("tab", { name: "chapters/INTRO.TEX" })).toBeTruthy();
+});
+it("restores tab IDs and active tab without storing unsaved document text", async () => {
+  const result = open();
+  replace(await editor(), "Private unsaved text");
   fireEvent.change(
-    screen.getByRole('combobox', { name: '横並びで開く .tex' }),
+    screen.getByRole("combobox", { name: "横並びで開く .tex" }),
     {
-      target: { value: 'chapter' },
-    }
-  )
-  await editor()
-  const stored = localStorage.getItem('bilingual-editor-tabs:project')!
-  expect(stored).not.toContain('Private unsaved text')
-  result.unmount()
-  render(<BilingualEditorPanel />)
+      target: { value: "chapter" },
+    },
+  );
+  await editor();
+  const stored = localStorage.getItem("bilingual-editor-tabs:project")!;
+  expect(stored).not.toContain("Private unsaved text");
+  result.unmount();
+  render(<BilingualEditorPanel />);
   expect(
     screen
-      .getByRole('tab', { name: 'chapters/INTRO.TEX' })
-      .getAttribute('aria-selected')
-  ).toBe('true')
-  expect(screen.getAllByRole('tab')).toHaveLength(2)
-  expect((await editor()).state.doc.toString()).toBe('English before')
-})
-it('preserves a dirty tab when translation opens the saved English document', async () => {
-  open()
-  const english = await editor()
-  replace(english, 'Unsaved side draft')
+      .getByRole("tab", { name: "chapters/INTRO.TEX" })
+      .getAttribute("aria-selected"),
+  ).toBe("true");
+  expect(screen.getAllByRole("tab")).toHaveLength(2);
+  expect((await editor()).state.doc.toString()).toBe("English before");
+});
+it("preserves a dirty tab when translation opens the saved English document", async () => {
+  open();
+  const english = await editor();
+  replace(english, "Unsaved side draft");
   act(() => {
     window.dispatchEvent(
-      new CustomEvent('overleaf:open-bilingual-editor', {
-        detail: { docId: 'en', refresh: true },
-      })
-    )
-  })
-  expect(await editor()).toBe(english)
-  expect(english.state.doc.toString()).toBe('Unsaved side draft')
-  expect(mocks.get).toHaveBeenCalledTimes(1)
-  expect(screen.getByText(/編集中の内容は保持/)).toBeTruthy()
-})
-it('reloads a clean existing tab when a new translation is saved', async () => {
-  open()
-  const first = await editor()
-  mocks.get.mockResolvedValueOnce({ content: 'New translation', version: 8 })
+      new CustomEvent("overleaf:open-bilingual-editor", {
+        detail: { docId: "en", refresh: true },
+      }),
+    );
+  });
+  expect(await editor()).toBe(english);
+  expect(english.state.doc.toString()).toBe("Unsaved side draft");
+  expect(mocks.get).toHaveBeenCalledTimes(1);
+  expect(screen.getByText(/編集中の内容は保持/)).toBeTruthy();
+});
+it("reloads a clean existing tab when a new translation is saved", async () => {
+  open();
+  const first = await editor();
+  mocks.get.mockResolvedValueOnce({ content: "New translation", version: 8 });
   act(() => {
     window.dispatchEvent(
-      new CustomEvent('overleaf:open-bilingual-editor', {
-        detail: { docId: 'en', refresh: true },
-      })
-    )
-  })
+      new CustomEvent("overleaf:open-bilingual-editor", {
+        detail: { docId: "en", refresh: true },
+      }),
+    );
+  });
   await waitFor(() =>
     expect(
-      screen.getByRole('textbox', { name: '横並びエディター' }).textContent
-    ).toBe('New translation')
-  )
-  expect(await editor()).not.toBe(first)
-  expect(mocks.get).toHaveBeenCalledTimes(2)
-})
+      screen.getByRole("textbox", { name: "横並びエディター" }).textContent,
+    ).toBe("New translation"),
+  );
+  expect(await editor()).not.toBe(first);
+  expect(mocks.get).toHaveBeenCalledTimes(2);
+});
 
-it('autosaves after typing and stops automatic retries after a conflict', async () => {
-  open()
-  const view = await editor()
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-  mocks.put.mockRejectedValueOnce({ data: { detail: 'Conflict' } })
-  replace(view, 'Autosaved draft')
+it("autosaves after typing and stops automatic retries after a conflict", async () => {
+  open();
+  const view = await editor();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  mocks.put.mockRejectedValueOnce({ data: { detail: "Conflict" } });
+  replace(view, "Autosaved draft");
   await act(async () => {
-    vi.advanceTimersByTime(1500)
-  })
-  expect(mocks.put).toHaveBeenCalledTimes(1)
-  expect(view.state.doc.toString()).toBe('Autosaved draft')
+    vi.advanceTimersByTime(1500);
+  });
+  expect(mocks.put).toHaveBeenCalledTimes(1);
+  expect(view.state.doc.toString()).toBe("Autosaved draft");
   await act(async () => {
-    vi.advanceTimersByTime(30000)
-  })
-  replace(view, 'Keep local edits')
+    vi.advanceTimersByTime(30000);
+  });
+  replace(view, "Keep local edits");
   await act(async () => {
-    vi.advanceTimersByTime(30000)
-  })
-  expect(mocks.put).toHaveBeenCalledTimes(1)
-})
-it('keeps autosave versions separate for each tab', async () => {
-  open()
-  const english = await editor()
+    vi.advanceTimersByTime(30000);
+  });
+  expect(mocks.put).toHaveBeenCalledTimes(1);
+});
+it("keeps autosave versions separate for each tab", async () => {
+  open();
+  const english = await editor();
   fireEvent.change(
-    screen.getByRole('combobox', { name: '横並びで開く .tex' }),
+    screen.getByRole("combobox", { name: "横並びで開く .tex" }),
     {
-      target: { value: 'chapter' },
-    }
-  )
-  const chapter = await editor()
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-  replace(english, 'English autosave')
-  replace(chapter, 'Chapter autosave')
+      target: { value: "chapter" },
+    },
+  );
+  const chapter = await editor();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  replace(english, "English autosave");
+  replace(chapter, "Chapter autosave");
   await act(async () => {
-    vi.advanceTimersByTime(1500)
-  })
+    vi.advanceTimersByTime(1500);
+  });
   expect(mocks.put).toHaveBeenCalledWith(
-    '/project/project/local-llm/doc-content',
-    { body: { doc_id: 'en', content: 'English autosave', version: 5 } }
-  )
+    "/project/project/local-llm/doc-content",
+    { body: { doc_id: "en", content: "English autosave", version: 5 } },
+  );
   expect(mocks.put).toHaveBeenCalledWith(
-    '/project/project/local-llm/doc-content',
-    { body: { doc_id: 'chapter', content: 'Chapter autosave', version: 5 } }
-  )
-})
-it('opens a selected document from the rail launcher', () => {
-  const listener = vi.fn()
-  window.addEventListener('overleaf:open-bilingual-editor', listener)
+    "/project/project/local-llm/doc-content",
+    { body: { doc_id: "chapter", content: "Chapter autosave", version: 5 } },
+  );
+});
+it("opens documents from the rail launcher list and current-file button", () => {
+  const listener = vi.fn();
+  window.addEventListener("overleaf:open-bilingual-editor", listener);
   try {
-    render(<SplitLauncherPanel />)
-    fireEvent.change(
-      screen.getByRole('combobox', { name: '横並びに追加する文書' }),
-      {
-        target: { value: 'chapter' },
-      }
-    )
-    fireEvent.click(screen.getByRole('button', { name: '横並びで開く' }))
-    expect(listener.mock.calls[0][0].detail).toEqual({ docId: 'chapter' })
+    render(<SplitLauncherPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "chapters/INTRO.TEX" }));
+    expect(listener.mock.calls[0][0].detail).toEqual({ docId: "chapter" });
+    fireEvent.click(
+      screen.getByRole("button", { name: "開いているファイルを横並びに" }),
+    );
+    expect(listener.mock.calls[1][0].detail).toEqual({ docId: "jp" });
   } finally {
-    window.removeEventListener('overleaf:open-bilingual-editor', listener)
+    window.removeEventListener("overleaf:open-bilingual-editor", listener);
   }
-})
+});
 
-it('formats the right-hand document with official commands and retains undo', async () => {
-  open()
-  const view = await editor()
-  act(() => view.dispatch({ selection: { anchor: 0, head: 7 } }))
-  fireEvent.click(screen.getByRole('button', { name: 'toolbar_bold' }))
-  expect(view.state.doc.toString()).toBe('\\textbf{English} before')
-  fireEvent.click(screen.getByRole('button', { name: 'toolbar_undo' }))
-  expect(view.state.doc.toString()).toBe('English before')
-  expect(mocks.put).not.toHaveBeenCalled()
-})
-it('formatting respects read-only permissions', async () => {
-  mocks.write = false
-  open()
-  const view = await editor()
-  fireEvent.click(screen.getByRole('button', { name: 'toolbar_bold' }))
-  expect(view.state.doc.toString()).toBe('English before')
-  expect(mocks.put).not.toHaveBeenCalled()
-})
-it('moves a saved side tab back to the main editor', async () => {
-  open()
-  await editor()
+it("formats the right-hand document with official commands and retains undo", async () => {
+  open();
+  const view = await editor();
+  act(() => view.dispatch({ selection: { anchor: 0, head: 7 } }));
+  // 公式ツールバーの太字ボタンが呼ぶのと同一の公式コマンド経路。
+  act(() => commands.toggleBold(view));
+  expect(view.state.doc.toString()).toBe("\\textbf{English} before");
+  act(() => undo(view));
+  expect(view.state.doc.toString()).toBe("English before");
+  expect(mocks.put).not.toHaveBeenCalled();
+});
+it("formatting respects read-only permissions", async () => {
+  mocks.write = false;
+  open();
+  const view = await editor();
+  act(() => {
+    if (!view.state.readOnly) commands.toggleBold(view);
+  });
+  expect(view.state.readOnly).toBe(true);
+  expect(view.state.doc.toString()).toBe("English before");
+  expect(mocks.put).not.toHaveBeenCalled();
+});
+it("moves a saved side tab back to the main editor", async () => {
+  open();
+  await editor();
   fireEvent.click(
-    screen.getByRole('button', { name: 'main.en.tex を左のエディターへ移す' })
-  )
-  await waitFor(() => expect(mocks.openMain).toHaveBeenCalledWith('en'))
+    screen.getByRole("button", { name: "main.en.tex を左のエディターへ移す" }),
+  );
+  await waitFor(() => expect(mocks.openMain).toHaveBeenCalledWith("en"));
   await waitFor(() =>
-    expect(screen.queryByRole('tab', { name: 'main.en.tex' })).toBeNull()
-  )
-})
-it('retains unsaved edits when a move to the main editor is requested', async () => {
-  open()
-  const view = await editor()
-  replace(view, 'unsaved text')
+    expect(screen.queryByRole("tab", { name: "main.en.tex" })).toBeNull(),
+  );
+});
+it("saves unsaved edits before moving a side tab to the main editor", async () => {
+  // 自動保存を 409 で失敗させて dirty を残した状態で移動すると、先に保存する。
+  open();
+  const view = await editor();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  mocks.put.mockRejectedValueOnce({ data: { detail: "Conflict" } });
+  replace(view, "unsaved text");
+  await act(async () => {
+    vi.advanceTimersByTime(1500);
+  });
+  await act(async () => {});
+  expect(screen.getByRole("alert").textContent).toContain("Conflict");
+  vi.useRealTimers();
   fireEvent.click(
-    screen.getByRole('button', { name: 'main.en.tex を左のエディターへ移す' })
-  )
-  expect(mocks.openMain).not.toHaveBeenCalled()
-  expect(view.state.doc.toString()).toBe('unsaved text')
-  expect(
-    screen.getByText(
-      '未保存の変更を保存してから、左のエディターへ移してください。'
-    )
-  ).toBeTruthy()
-})
-it('retains a saved side tab if opening the main editor fails', async () => {
-  mocks.openMain.mockRejectedValue(new Error('offline'))
-  open()
-  await editor()
+    screen.getByRole("button", { name: "main.en.tex を左のエディターへ移す" }),
+  );
+  await waitFor(
+    () => expect(mocks.put.mock.calls.length).toBeGreaterThanOrEqual(2),
+    { timeout: 2500 },
+  );
+  await waitFor(() => expect(mocks.openMain).toHaveBeenCalledWith("en"), {
+    timeout: 2500,
+  });
+  await waitFor(() =>
+    expect(screen.queryByRole("tab", { name: "main.en.tex" })).toBeNull(),
+  );
+  expect(view.state.doc.toString()).toBe("unsaved text");
+  expect(mocks.put).toHaveBeenCalledTimes(2);
+  expect(mocks.put.mock.calls[1][1]).toEqual({
+    body: { doc_id: "en", content: "unsaved text", version: 5 },
+  });
+});
+it("retains a saved side tab if opening the main editor fails", async () => {
+  mocks.openMain.mockRejectedValue(new Error("offline"));
+  open();
+  await editor();
   fireEvent.click(
-    screen.getByRole('button', { name: 'main.en.tex を左のエディターへ移す' })
-  )
+    screen.getByRole("button", { name: "main.en.tex を左のエディターへ移す" }),
+  );
   await screen.findByText(
-    '左のエディターで開けませんでした。横並び側のタブは保持しています。'
-  )
-  expect(screen.getByRole('tab', { name: 'main.en.tex' })).toBeTruthy()
-})
-it('accepts a main .tex tab drop and closes it on the main side', async () => {
-  open()
-  await editor()
-  const target = screen.getByRole('tablist', {
-    name: '横並びの文書',
-  }).parentElement!
+    "左のエディターで開けませんでした。横並び側のタブは保持しています。",
+  );
+  expect(screen.getByRole("tab", { name: "main.en.tex" })).toBeTruthy();
+});
+it("accepts a main .tex tab drop and closes it on the main side", async () => {
+  open();
+  await editor();
+  const target = screen.getByRole("tablist", {
+    name: "横並びの文書",
+  }).parentElement!;
   fireEvent.drop(target, {
-    dataTransfer: { types: ['text/x.tab-id'], getData: () => 'jp' },
-  })
-  await waitFor(() => expect(mocks.closeMain).toHaveBeenCalledWith('jp'))
-  expect(screen.getByRole('tab', { name: 'main.tex' })).toBeTruthy()
-})
-it('keeps the last main tab and ignores unknown document drops', async () => {
-  mocks.tabs = [{ id: 'jp' }]
-  open()
-  await editor()
-  const target = screen.getByRole('tablist', {
-    name: '横並びの文書',
-  }).parentElement!
+    dataTransfer: { types: ["text/x.tab-id"], getData: () => "jp" },
+  });
+  await waitFor(() => expect(mocks.closeMain).toHaveBeenCalledWith("jp"));
+  expect(screen.getByRole("tab", { name: "main.tex" })).toBeTruthy();
+});
+it("keeps the last main tab and ignores unknown document drops", async () => {
+  mocks.tabs = [{ id: "jp" }];
+  open();
+  await editor();
+  const target = screen.getByRole("tablist", {
+    name: "横並びの文書",
+  }).parentElement!;
   fireEvent.drop(target, {
-    dataTransfer: { types: ['text/x.tab-id'], getData: () => 'foreign' },
-  })
-  expect(screen.getAllByRole('tab')).toHaveLength(1)
+    dataTransfer: { types: ["text/x.tab-id"], getData: () => "foreign" },
+  });
+  expect(screen.getAllByRole("tab")).toHaveLength(1);
   fireEvent.drop(target, {
-    dataTransfer: { types: ['text/x.tab-id'], getData: () => 'jp' },
-  })
-  await screen.findByRole('tab', { name: 'main.tex' })
-  expect(mocks.closeMain).not.toHaveBeenCalled()
-})
+    dataTransfer: { types: ["text/x.tab-id"], getData: () => "jp" },
+  });
+  await screen.findByRole("tab", { name: "main.tex" });
+  expect(mocks.closeMain).not.toHaveBeenCalled();
+});
 
-it('retains a tab opened while another tab is moving to the main editor', async () => {
-  let finish!: () => void
-  mocks.openMain.mockImplementation(()=>new Promise<void>(resolve=>{finish=resolve}))
-  open()
-  await editor()
-  fireEvent.click(screen.getByRole('button',{name:'main.en.tex を左のエディターへ移す'}))
-  await waitFor(()=>expect(mocks.openMain).toHaveBeenCalled())
-  fireEvent.change(screen.getByRole('combobox',{name:'横並びで開く .tex'}),{target:{value:'chapter'}})
-  await screen.findByRole('tab',{name:'chapters/INTRO.TEX'})
-  await act(async()=>{finish()})
-  expect(screen.getByRole('tab',{name:'chapters/INTRO.TEX'})).toBeTruthy()
-  expect(screen.queryByRole('tab',{name:'main.en.tex'})).toBeNull()
-})
+it("retains a tab opened while another tab is moving to the main editor", async () => {
+  let finish!: () => void;
+  mocks.openMain.mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  open();
+  await editor();
+  fireEvent.click(
+    screen.getByRole("button", { name: "main.en.tex を左のエディターへ移す" }),
+  );
+  await waitFor(() => expect(mocks.openMain).toHaveBeenCalled());
+  fireEvent.change(
+    screen.getByRole("combobox", { name: "横並びで開く .tex" }),
+    { target: { value: "chapter" } },
+  );
+  await screen.findByRole("tab", { name: "chapters/INTRO.TEX" });
+  await act(async () => {
+    finish();
+  });
+  expect(screen.getByRole("tab", { name: "chapters/INTRO.TEX" })).toBeTruthy();
+  expect(screen.queryByRole("tab", { name: "main.en.tex" })).toBeNull();
+});

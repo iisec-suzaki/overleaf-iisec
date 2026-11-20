@@ -19,84 +19,86 @@ import {
   useRef,
   useState,
   type CSSProperties,
-} from 'react'
-import { language } from '@codemirror/language'
+} from "react";
+import { language } from "@codemirror/language";
 import {
   useCodeMirrorStateContext,
   useCodeMirrorViewContext,
-} from '@/features/source-editor/components/codemirror-context'
-import { usePermissionsContext } from '@/features/ide-react/context/permissions-context'
-import { useEditorManagerContext } from '@/features/ide-react/context/editor-manager-context'
-import { useFileTreePathContext } from '@/features/file-tree/contexts/file-tree-path'
-import { useProjectContext } from '@/shared/context/project-context'
-import { getJSON, postJSON, putJSON } from '@/infrastructure/fetch-json'
-import getMeta from '@/utils/meta'
-import ConnectionSettings from './ConnectionSettings'
+} from "@/features/source-editor/components/codemirror-context";
+import { usePermissionsContext } from "@/features/ide-react/context/permissions-context";
+import { useEditorManagerContext } from "@/features/ide-react/context/editor-manager-context";
+import { useFileTreePathContext } from "@/features/file-tree/contexts/file-tree-path";
+import { useProjectContext } from "@/shared/context/project-context";
+import { getJSON, postJSON, putJSON } from "@/infrastructure/fetch-json";
+import getMeta from "@/utils/meta";
+import ConnectionSettings from "./ConnectionSettings";
 import {
   maskPartialMarkers,
   readTranslationStream,
   type TranslationReply,
   type TranslationStreamEvent,
-} from './translation-stream'
+} from "./translation-stream";
 
 // ---- 翻訳 API が返すデータの型定義 -----------------------------------------
 
-type Model = { id: string; owned_by?: string }
-type GlossaryTerm = { source: string; target: string }
+type Model = { id: string; owned_by?: string };
+type GlossaryTerm = { source: string; target: string };
 type ProjectSettings = {
-  terms: GlossaryTerm[]
-  model: string | null
-  context: string
-  endpoint_id?: string | null
-  prompt_instructions?: string
-  default_prompt_instructions?: string
-}
+  terms: GlossaryTerm[];
+  model: string | null;
+  context: string;
+  endpoint_id?: string | null;
+  prompt_instructions?: string;
+  default_prompt_instructions?: string;
+};
 // 翻訳対象の指定方法（選択範囲 / 現在のファイル全体）。
-type Target = 'selection' | 'file'
+type Target = "selection" | "file";
 // 翻訳開始時の文書状態の照合用スナップショット。
 // 翻訳完了時に現在の内容と違う場合、結果の適用・保存を止めます。
 type Snapshot = {
-  text: string
-  document: string
-  sourceDocId: string
-  from: number
-  to: number
-  target: Target
-}
+  text: string;
+  document: string;
+  sourceDocId: string;
+  from: number;
+  to: number;
+  target: Target;
+};
 
 /** API エラーから日本語のメッセージを取り出します（detail 優先）。 */
 function getErrorMessage(error: unknown): string {
-  const candidate = error as { data?: { detail?: string }; message?: string }
-  return candidate?.data?.detail || candidate?.message || '処理に失敗しました。'
+  const candidate = error as { data?: { detail?: string }; message?: string };
+  return (
+    candidate?.data?.detail || candidate?.message || "処理に失敗しました。"
+  );
 }
 
 async function streamTranslation(
   path: string,
   body: { text: string; model: string },
   signal: AbortSignal,
-  onEvent: (event: TranslationStreamEvent) => void
+  onEvent: (event: TranslationStreamEvent) => void,
 ): Promise<TranslationReply> {
   const response = await fetch(path, {
-    method: 'POST',
-    credentials: 'same-origin',
+    method: "POST",
+    credentials: "same-origin",
     signal,
     headers: {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-      'X-Csrf-Token': getMeta('ol-csrfToken'),
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+      "X-Csrf-Token": getMeta("ol-csrfToken"),
     },
     body: JSON.stringify(body),
-  })
+  });
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => ({}))
+    const payload = await response.json().catch(() => ({}));
     throw new Error(
-      payload.detail || `翻訳サービスが HTTP ${response.status} を返しました。`
-    )
+      payload.detail || `翻訳サービスが HTTP ${response.status} を返しました。`,
+    );
   }
-  if (!response.body) throw new Error('ストリーミング応答を読み取れません。')
+  if (!response.body) throw new Error("ストリーミング応答を読み取れません。");
 
-  return readTranslationStream(response.body, onEvent)
+  return readTranslationStream(response.body, onEvent);
 }
 
 /**
@@ -107,41 +109,41 @@ export default function TranslationToolbar({
   embedded = false,
   editorAvailable = true,
 }: { embedded?: boolean; editorAvailable?: boolean } = {}) {
-  const state = useCodeMirrorStateContext()
-  const view = useCodeMirrorViewContext()
-  const editorManager = useEditorManagerContext()
-  const permissions = usePermissionsContext()
-  const { pathInFolder, dirname, findEntityByPath } = useFileTreePathContext()
-  const { projectId, project, updateProject } = useProjectContext()
+  const state = useCodeMirrorStateContext();
+  const view = useCodeMirrorViewContext();
+  const editorManager = useEditorManagerContext();
+  const permissions = usePermissionsContext();
+  const { pathInFolder, dirname, findEntityByPath } = useFileTreePathContext();
+  const { projectId, project, updateProject } = useProjectContext();
   // ---- パネルの表示状態・翻訳結果などの状態値 ------------------------------
-  const [open, setOpen] = useState(false)
-  const [target, setTarget] = useState<Target>('file')
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
-  const [models, setModels] = useState<Model[]>([])
-  const [terms, setTerms] = useState<GlossaryTerm[]>([])
-  const [context, setContext] = useState('')
-  const [personalConnection, setPersonalConnection] = useState('')
-  const [endpointId, setEndpointId] = useState<string | null>(null)
-  const [promptInstructions, setPromptInstructions] = useState('')
-  const [defaultPrompt, setDefaultPrompt] = useState('')
-  const [loading, setLoading] = useState(false)
-  const modelsRequestRef = useRef(0)
-  const [selectedModel, setSelectedModel] = useState('')
-  const [consented, setConsented] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [progress, setProgress] = useState('')
-  const [completedPreview, setCompletedPreview] = useState('')
-  const [partialPreview, setPartialPreview] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [result, setResult] = useState<TranslationReply | null>(null)
-  const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
-  const translationAbortRef = useRef<AbortController | null>(null)
+  const [open, setOpen] = useState(false);
+  const [target, setTarget] = useState<Target>("file");
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [models, setModels] = useState<Model[]>([]);
+  const [terms, setTerms] = useState<GlossaryTerm[]>([]);
+  const [context, setContext] = useState("");
+  const [personalConnection, setPersonalConnection] = useState("");
+  const [endpointId, setEndpointId] = useState<string | null>(null);
+  const [promptInstructions, setPromptInstructions] = useState("");
+  const [defaultPrompt, setDefaultPrompt] = useState("");
+  const [loading, setLoading] = useState(false);
+  const modelsRequestRef = useRef(0);
+  const [selectedModel, setSelectedModel] = useState("");
+  const [consented, setConsented] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState("");
+  const [completedPreview, setCompletedPreview] = useState("");
+  const [partialPreview, setPartialPreview] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState<TranslationReply | null>(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const translationAbortRef = useRef<AbortController | null>(null);
 
-  const projectPath = `/project/${projectId}/local-llm`
-  const isLatex = state.facet(language)?.name === 'latex'
-  const selection = state.selection.main
-  const hasSelection = !selection.empty
+  const projectPath = `/project/${projectId}/local-llm`;
+  const isLatex = state.facet(language)?.name === "latex";
+  const selection = state.selection.main;
+  const hasSelection = !selection.empty;
   // 結果を適用・保存できる条件: 翻訳後に対象ドキュメントが一度も編集されていないこと。
   const canApply = Boolean(
     permissions.write &&
@@ -150,187 +152,187 @@ export default function TranslationToolbar({
     (result || completedPreview) &&
     snapshot &&
     editorManager.getCurrentDocumentId() === snapshot.sourceDocId &&
-    view.state.doc.toString() === snapshot.document
-  )
+    view.state.doc.toString() === snapshot.document,
+  );
 
   const loadModels = useCallback(
-    async (endpoint: string | null, preferred = '') => {
-      const request = ++modelsRequestRef.current
-      setLoading(true)
-      setError('')
+    async (endpoint: string | null, preferred = "") => {
+      const request = ++modelsRequestRef.current;
+      setLoading(true);
+      setError("");
       try {
-        if (getMeta('ol-ExposedSettings')?.llmEnabled) {
+        if (getMeta("ol-ExposedSettings")?.llmEnabled) {
           const { settings } = await getJSON<{
-            settings: { providerId?: string; model?: string }
-          }>('/user/llm-translation-settings')
+            settings: { providerId?: string; model?: string };
+          }>("/user/llm-translation-settings");
           if (settings.providerId) {
             const { providers } = await getJSON<{
               providers: {
-                id: string
-                name: string
-                enabled: boolean
-                models: string[]
-              }[]
-            }>('/user/llm-providers')
+                id: string;
+                name: string;
+                enabled: boolean;
+                models: string[];
+              }[];
+            }>("/user/llm-providers");
             const row = providers.find(
               (candidate) =>
-                candidate.id === settings.providerId && candidate.enabled
-            )
+                candidate.id === settings.providerId && candidate.enabled,
+            );
             if (!row)
               throw new Error(
-                '翻訳用の個人接続先が利用できません。LLM Settingsで選び直してください。'
-              )
-            if (request !== modelsRequestRef.current) return
-            const data = row.models.map((id) => ({ id }))
-            setPersonalConnection(row.name)
-            setModels(data)
+                "翻訳用の個人接続先が利用できません。LLM Settingsで選び直してください。",
+              );
+            if (request !== modelsRequestRef.current) return;
+            const data = row.models.map((id) => ({ id }));
+            setPersonalConnection(row.name);
+            setModels(data);
             setSelectedModel(
               settings.model ||
                 (row.models.includes(preferred)
                   ? preferred
-                  : row.models[0] || '')
-            )
-            return
+                  : row.models[0] || ""),
+            );
+            return;
           }
         }
-        setPersonalConnection('')
+        setPersonalConnection("");
         const suffix = endpoint
           ? `?endpoint_id=${encodeURIComponent(endpoint)}`
-          : ''
+          : "";
         const response = await getJSON<{ data: Model[] }>(
-          `/local-llm/models${suffix}`
-        )
-        if (request !== modelsRequestRef.current) return
-        setModels(response.data)
+          `/local-llm/models${suffix}`,
+        );
+        if (request !== modelsRequestRef.current) return;
+        setModels(response.data);
         setSelectedModel((current) => {
           if (response.data.some((model) => model.id === preferred))
-            return preferred
+            return preferred;
           if (response.data.some((model) => model.id === current))
-            return current
-          return response.data[0]?.id || ''
-        })
+            return current;
+          return response.data[0]?.id || "";
+        });
       } catch (failure) {
-        if (request !== modelsRequestRef.current) return
-        setModels([])
-        setSelectedModel('')
-        setError(getErrorMessage(failure))
+        if (request !== modelsRequestRef.current) return;
+        setModels([]);
+        setSelectedModel("");
+        setError(getErrorMessage(failure));
       } finally {
-        if (request === modelsRequestRef.current) setLoading(false)
+        if (request === modelsRequestRef.current) setLoading(false);
       }
     },
-    []
-  )
+    [],
+  );
 
   const loadPanel = useCallback(async () => {
-    setOpen(true)
-    setError('')
-    setNotice('')
-    setResult(null)
-    setCompletedPreview('')
-    setPartialPreview('')
-    setConsented(false)
-    setTarget(hasSelection ? 'selection' : 'file')
-    setSnapshot(null)
-    setLoading(true)
+    setOpen(true);
+    setError("");
+    setNotice("");
+    setResult(null);
+    setCompletedPreview("");
+    setPartialPreview("");
+    setConsented(false);
+    setTarget(hasSelection ? "selection" : "file");
+    setSnapshot(null);
+    setLoading(true);
     try {
       // プロジェクトの選択先を先に読み、その接続先のモデルだけを表示します。
-      const loaded = await getJSON<ProjectSettings>(`${projectPath}/settings`)
-      setTerms(loaded.terms || [])
-      setContext(loaded.context || '')
-      setEndpointId(loaded.endpoint_id || null)
-      setPromptInstructions(loaded.prompt_instructions || '')
-      setDefaultPrompt(loaded.default_prompt_instructions || '')
-      await loadModels(loaded.endpoint_id || null, loaded.model || '')
+      const loaded = await getJSON<ProjectSettings>(`${projectPath}/settings`);
+      setTerms(loaded.terms || []);
+      setContext(loaded.context || "");
+      setEndpointId(loaded.endpoint_id || null);
+      setPromptInstructions(loaded.prompt_instructions || "");
+      setDefaultPrompt(loaded.default_prompt_instructions || "");
+      await loadModels(loaded.endpoint_id || null, loaded.model || "");
     } catch (failure) {
-      setLoading(false)
-      setError(getErrorMessage(failure))
+      setLoading(false);
+      setError(getErrorMessage(failure));
     }
-  }, [hasSelection, projectPath, loadModels])
+  }, [hasSelection, projectPath, loadModels]);
 
   // レールでは初めてエディターが利用可能になったときだけ設定を読む。
   // 選択範囲の変更やタブの開閉で、翻訳途中の状態をリセットしない。
-  const initialized = useRef(false)
+  const initialized = useRef(false);
   useEffect(() => {
     if (embedded && editorAvailable && !initialized.current) {
-      initialized.current = true
-      void loadPanel()
+      initialized.current = true;
+      void loadPanel();
     }
-  }, [embedded, editorAvailable, loadPanel])
+  }, [embedded, editorAvailable, loadPanel]);
 
   // Escape キーでパネルを閉じられるようにします（翻訳中・保存中は閉じません）。
   useEffect(() => {
-    if (!open || embedded) return
+    if (!open || embedded) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !busy && !saving) setOpen(false)
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [busy, open, saving, embedded])
+      if (event.key === "Escape" && !busy && !saving) setOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [busy, open, saving, embedded]);
 
   // コンポーネントがアンマウントされたら、未完了の翻訳ストリームを必ず止めます。
   useEffect(
     () => () => {
-      translationAbortRef.current?.abort()
+      translationAbortRef.current?.abort();
     },
-    []
-  )
+    [],
+  );
 
   // 本文を書き換える操作を含むため、サーバーと同じ書き込み権限を要求します。
-  if (!isLatex || !permissions.write) return null
+  if (!isLatex || !permissions.write) return null;
 
   /** 用語集・モデル・文体メモをプロジェクト設定として保存します。 */
   const saveSettings = async (promptOverride?: string) => {
-    setSaving(true)
-    setError('')
+    setSaving(true);
+    setError("");
     try {
       const updated = await putJSON<ProjectSettings>(
         `${projectPath}/settings`,
         {
           body: {
             terms: terms.filter(
-              (term) => term.source.trim() && term.target.trim()
+              (term) => term.source.trim() && term.target.trim(),
             ),
             model: selectedModel || null,
             context,
             endpoint_id: endpointId,
             prompt_instructions: promptOverride ?? promptInstructions,
           },
-        }
-      )
-      setTerms(updated.terms || [])
-      setNotice('用語集・文書コンテキスト・システムプロンプトを保存しました。')
-      return true
+        },
+      );
+      setTerms(updated.terms || []);
+      setNotice("用語集・文書コンテキスト・システムプロンプトを保存しました。");
+      return true;
     } catch (saveError) {
-      setError(getErrorMessage(saveError))
-      return false
+      setError(getErrorMessage(saveError));
+      return false;
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   /** システムプロンプトを既定文へワンクリックで戻します（保存も同時に行う）。 */
   const resetPromptToDefault = async () => {
     if (
       !window.confirm(
-        'システムプロンプトを既定文に戻します。現在の自作指示は削除されます。よろしいですか？'
+        "システムプロンプトを既定文に戻します。現在の自作指示は削除されます。よろしいですか？",
       )
     ) {
-      return
+      return;
     }
-    setPromptInstructions('')
-    const saved = await saveSettings('')
+    setPromptInstructions("");
+    const saved = await saveSettings("");
     if (saved) {
-      setNotice('システムプロンプトを既定文に戻して保存しました。')
+      setNotice("システムプロンプトを既定文に戻して保存しました。");
     }
-  }
+  };
 
   /** 翻訳開始時点の原文・選択位置・対象ドキュメント ID を記録します。 */
   const captureSnapshot = (): Snapshot => {
-    const current = view.state
-    const selected = current.selection.main
-    const currentDocument = current.doc.toString()
-    const sourceDocId = editorManager.getCurrentDocumentId() || ''
-    if (target === 'selection' && !selected.empty) {
+    const current = view.state;
+    const selected = current.selection.main;
+    const currentDocument = current.doc.toString();
+    const sourceDocId = editorManager.getCurrentDocumentId() || "";
+    if (target === "selection" && !selected.empty) {
       return {
         text: current.doc.sliceString(selected.from, selected.to),
         document: currentDocument,
@@ -338,7 +340,7 @@ export default function TranslationToolbar({
         from: selected.from,
         to: selected.to,
         target,
-      }
+      };
     }
     return {
       text: currentDocument,
@@ -346,124 +348,124 @@ export default function TranslationToolbar({
       sourceDocId,
       from: 0,
       to: current.doc.length,
-      target: 'file',
-    }
-  }
+      target: "file",
+    };
+  };
 
   /** 翻訳開始の入口。スナップショット採取 → 設定保存 → SSE 翻訳の順に進めます。 */
   const runTranslation = async () => {
-    if (!editorAvailable) return
-    const captured = captureSnapshot()
+    if (!editorAvailable) return;
+    const captured = captureSnapshot();
     if (!captured.text.trim()) {
-      setError('翻訳する内容がありません。')
-      return
+      setError("翻訳する内容がありません。");
+      return;
     }
     if (!captured.sourceDocId) {
-      setError('翻訳元の .tex ファイルを特定できません。')
-      return
+      setError("翻訳元の .tex ファイルを特定できません。");
+      return;
     }
     if (!selectedModel) {
-      setError('利用可能なモデルを取得し、使用モデルを選択してください。')
-      return
+      setError("利用可能なモデルを取得し、使用モデルを選択してください。");
+      return;
     }
-    setBusy(true)
-    setError('')
-    setNotice('')
-    setResult(null)
-    setSnapshot(captured)
-    setProgress('用語集と文書メモを保存しています。')
-    setCompletedPreview('')
-    setPartialPreview('')
-    const abortController = new AbortController()
-    translationAbortRef.current = abortController
+    setBusy(true);
+    setError("");
+    setNotice("");
+    setResult(null);
+    setSnapshot(captured);
+    setProgress("用語集と文書メモを保存しています。");
+    setCompletedPreview("");
+    setPartialPreview("");
+    const abortController = new AbortController();
+    translationAbortRef.current = abortController;
     try {
-      const saved = await saveSettings()
+      const saved = await saveSettings();
       if (abortController.signal.aborted) {
-        setNotice('翻訳を停止しました。途中の結果は適用されていません。')
-        return
+        setNotice("翻訳を停止しました。途中の結果は適用されていません。");
+        return;
       }
-      if (!saved) return
-      setProgress('ローカルLLMに接続しています。')
+      if (!saved) return;
+      setProgress("ローカルLLMに接続しています。");
       const reply = await streamTranslation(
         `${projectPath}/translate`,
         { text: captured.text, model: selectedModel },
         abortController.signal,
         (event) => {
-          if (event.type === 'progress') {
-            setProgress(event.message)
-            if (event.phase === 'retrying') setPartialPreview('')
+          if (event.type === "progress") {
+            setProgress(event.message);
+            if (event.phase === "retrying") setPartialPreview("");
           }
-          if (event.type === 'delta') {
-            setPartialPreview((current) => current + event.text)
+          if (event.type === "delta") {
+            setPartialPreview((current) => current + event.text);
           }
-          if (event.type === 'chunk_complete') {
-            setCompletedPreview((current) => current + event.text)
-            setPartialPreview('')
+          if (event.type === "chunk_complete") {
+            setCompletedPreview((current) => current + event.text);
+            setPartialPreview("");
           }
-        }
-      )
-      if (abortController.signal.aborted) return
-      setResult(reply)
-      setProgress('LaTeX構造の検証が完了しました。')
+        },
+      );
+      if (abortController.signal.aborted) return;
+      setResult(reply);
+      setProgress("LaTeX構造の検証が完了しました。");
       if (reply.failed_chunks && reply.failed_chunks.length > 0) {
         setNotice(
-          `${reply.chunks} チャンク中 ${reply.failed_chunks.length} 件が翻訳に失敗したため原文を保持しています（第 ${reply.failed_chunks.join('・')} チャンク）。未翻訳部分を直してから、必要なら再実行してください。`
-        )
+          `${reply.chunks} チャンク中 ${reply.failed_chunks.length} 件が翻訳に失敗したため原文を保持しています（第 ${reply.failed_chunks.join("・")} チャンク）。未翻訳部分を直してから、必要なら再実行してください。`,
+        );
       } else {
         setNotice(
-          `${reply.chunks} チャンクを翻訳しました。内容を確認して英語版として保存してください。`
-        )
+          `${reply.chunks} チャンクを翻訳しました。内容を確認して英語版として保存してください。`,
+        );
       }
     } catch (translationError) {
       // 停止・失敗でも、これまでに確定済みのプレビューは消しません（再実行の材料に残す）。
       if (abortController.signal.aborted) {
         setNotice(
-          '翻訳を停止しました。これまでに確定したチャンクはプレビューに残っています。'
-        )
+          "翻訳を停止しました。これまでに確定したチャンクはプレビューに残っています。",
+        );
       } else {
-        setError(getErrorMessage(translationError))
+        setError(getErrorMessage(translationError));
       }
     } finally {
       if (translationAbortRef.current === abortController) {
-        translationAbortRef.current = null
+        translationAbortRef.current = null;
       }
-      setBusy(false)
-      setProgress('')
+      setBusy(false);
+      setProgress("");
     }
-  }
+  };
 
   /** 翻訳停止。fetch を中断し、Overleaf 経由で LLM まで停止要求を伝えます。 */
   const stopTranslation = () => {
-    if (!translationAbortRef.current) return
-    setNotice('LLMへの停止要求を送信しています。')
-    translationAbortRef.current.abort()
-  }
+    if (!translationAbortRef.current) return;
+    setNotice("LLMへの停止要求を送信しています。");
+    translationAbortRef.current.abort();
+  };
 
   /** 選択範囲翻訳の結果を原文の該当範囲へ置き換えます（確認ダイアログ付き）。 */
   const applyResult = () => {
-    if (!result || !snapshot) return
+    if (!result || !snapshot) return;
     if (!canApply) {
       setError(
-        '翻訳中に原文が変更されたか、別のファイルへ移動しました。現在の文書で翻訳し直してください。'
-      )
-      return
+        "翻訳中に原文が変更されたか、別のファイルへ移動しました。現在の文書で翻訳し直してください。",
+      );
+      return;
     }
     if (
-      snapshot.target === 'selection' &&
+      snapshot.target === "selection" &&
       !window.confirm(
-        '選択範囲を翻訳結果で置き換えます。日本語原文のこの範囲は変更されます。続けますか？'
+        "選択範囲を翻訳結果で置き換えます。日本語原文のこの範囲は変更されます。続けますか？",
       )
     ) {
-      return
+      return;
     }
     view.dispatch({
       changes: { from: snapshot.from, to: snapshot.to, insert: result.text },
       selection: { anchor: snapshot.from + result.text.length },
-    })
-    setNotice('翻訳をエディタへ適用しました。')
-    setResult(null)
-    setSnapshot(null)
-  }
+    });
+    setNotice("翻訳をエディタへ適用しました。");
+    setResult(null);
+    setSnapshot(null);
+  };
 
   /**
    * 翻訳結果を同じフォルダーの英語版 .en.tex として保存します。
@@ -472,70 +474,70 @@ export default function TranslationToolbar({
    */
   const saveEnglishDocument = async (setAsMainDocument: boolean) => {
     // 受信途中の delta は含めず、検証済みの最終結果か確定済みチャンクだけを保存する。
-    const content = result?.text ?? completedPreview
-    const isDraft = !result
-    if (busy || saving || !content || !snapshot || snapshot.target !== 'file')
-      return
+    const content = result?.text ?? completedPreview;
+    const isDraft = !result;
+    if (busy || saving || !content || !snapshot || snapshot.target !== "file")
+      return;
     // 未完了の文書をメイン文書へ切り替えない。草稿は別ファイルとして退避する。
-    if (isDraft && setAsMainDocument) return
+    if (isDraft && setAsMainDocument) return;
     if (!canApply) {
       setError(
-        '翻訳中に原文が変更されたか、別のファイルへ移動しました。現在の文書で翻訳し直してください。'
-      )
-      return
+        "翻訳中に原文が変更されたか、別のファイルへ移動しました。現在の文書で翻訳し直してください。",
+      );
+      return;
     }
 
     if (
       isDraft &&
       !window.confirm(
-        '翻訳は完走していません。確定済みチャンクだけを草稿として保存します。文書全体の LaTeX 検証は済んでいないため、保存後に内容を確認してください。続けますか？'
+        "翻訳は完走していません。確定済みチャンクだけを草稿として保存します。文書全体の LaTeX 検証は済んでいないため、保存後に内容を確認してください。続けますか？",
       )
     )
-      return
+      return;
 
-    const sourcePath = pathInFolder(snapshot.sourceDocId)
-    const sourceName = sourcePath?.split('/').pop()
-    if (!sourceName || !sourceName.toLowerCase().endsWith('.tex')) {
-      setError('翻訳元の .tex ファイル名を特定できません。')
-      return
+    const sourcePath = pathInFolder(snapshot.sourceDocId);
+    const sourceName = sourcePath?.split("/").pop();
+    if (!sourceName || !sourceName.toLowerCase().endsWith(".tex")) {
+      setError("翻訳元の .tex ファイル名を特定できません。");
+      return;
     }
-    if (sourceName.toLowerCase().endsWith('.en.tex')) {
+    if (sourceName.toLowerCase().endsWith(".en.tex")) {
       setError(
-        '英語版ファイルから別の英語版は作成できません。日本語原文のファイルを開いてください。'
-      )
-      return
+        "英語版ファイルから別の英語版は作成できません。日本語原文のファイルを開いてください。",
+      );
+      return;
     }
 
-    const parentPath = dirname(snapshot.sourceDocId) || ''
-    const parent = findEntityByPath(parentPath)
-    if (!parent || parent.type !== 'folder') {
-      setError('翻訳元ファイルの保存先フォルダーを特定できません。')
-      return
+    const parentPath = dirname(snapshot.sourceDocId) || "";
+    const parent = findEntityByPath(parentPath);
+    if (!parent || parent.type !== "folder") {
+      setError("翻訳元ファイルの保存先フォルダーを特定できません。");
+      return;
     }
 
-    const englishName = `${sourceName.slice(0, -4)}.en.tex`
-    const englishPath = [parentPath, englishName].filter(Boolean).join('/')
-    const existing = findEntityByPath(englishPath)
-    if (existing && existing.type !== 'doc') {
+    const englishName = `${sourceName.slice(0, -4)}.en.tex`;
+    const englishPath = [parentPath, englishName].filter(Boolean).join("/");
+    const existing = findEntityByPath(englishPath);
+    if (existing && existing.type !== "doc") {
       setError(
-        `${englishPath} という同名のファイルまたはフォルダーがあります。名前を変更してください。`
-      )
-      return
+        `${englishPath} という同名のファイルまたはフォルダーがあります。名前を変更してください。`,
+      );
+      return;
     }
 
-    const overwrite = existing?.type === 'doc'
+    const overwrite = existing?.type === "doc";
     if (
       overwrite &&
       !window.confirm(
-        `${englishPath} は既にあります。翻訳結果で英語版の内容を上書きしますか？日本語原文は変更されません。`
+        `${englishPath} は既にあります。翻訳結果で英語版の内容を上書きしますか？日本語原文は変更されません。`,
       )
     ) {
-      return
+      return;
     }
 
-    setSaving(true)
-    setError('')
-    setNotice('')
+    setSaving(true);
+    setError("");
+    setNotice("");
     try {
       const saved = await putJSON<{ doc: { _id: string; name: string } }>(
         `${projectPath}/english-document`,
@@ -547,70 +549,72 @@ export default function TranslationToolbar({
             content,
             overwrite,
           },
-        }
-      )
-      setResult(null)
-      setSnapshot(null)
-      setCompletedPreview('')
-      setPartialPreview('')
+        },
+      );
+      setResult(null);
+      setSnapshot(null);
+      setCompletedPreview("");
+      setPartialPreview("");
       // 横並び側に未保存の内容がある場合、そちらは破棄せずタブを選ぶだけにする。
       window.dispatchEvent(
-        new CustomEvent('overleaf:open-bilingual-editor', {
+        new CustomEvent("overleaf:open-bilingual-editor", {
           detail: { docId: saved.doc._id, refresh: true },
-        })
-      )
+        }),
+      );
       if (setAsMainDocument) {
         try {
           await postJSON(`/project/${projectId}/settings`, {
             body: { rootDocId: saved.doc._id },
-          })
-          if (project) updateProject({ rootDocId: saved.doc._id })
-          await editorManager.openDoc(saved.doc)
+          });
+          if (project) updateProject({ rootDocId: saved.doc._id });
+          await editorManager.openDoc(saved.doc);
           setNotice(
-            `${englishPath} を保存してメイン文書に設定し、英語版タブを開きました。「コンパイル」を押すと英語版のPDFを生成します。日本語原文は変更していません。`
-          )
+            `${englishPath} を保存してメイン文書に設定し、英語版タブを開きました。「コンパイル」を押すと英語版のPDFを生成します。日本語原文は変更していません。`,
+          );
         } catch (settingsError) {
           setError(
-            `英語版は ${englishPath} に保存されましたが、メイン文書またはエディタタブの切り替えに失敗しました。ファイルを右クリックして「メイン文書に設定」を選んでください。${getErrorMessage(settingsError)}`
-          )
+            `英語版は ${englishPath} に保存されましたが、メイン文書またはエディタタブの切り替えに失敗しました。ファイルを右クリックして「メイン文書に設定」を選んでください。${getErrorMessage(settingsError)}`,
+          );
         }
       } else {
         setNotice(
           isDraft
             ? `${englishPath} に訳済み部分を草稿として保存しました。文書全体の LaTeX 検証は未実施です。`
-            : `${englishPath} に英語版を${overwrite ? '上書き保存' : '作成'}しました。日本語原文は変更していません。`
-        )
+            : `${englishPath} に英語版を${overwrite ? "上書き保存" : "作成"}しました。日本語原文は変更していません。`,
+        );
       }
     } catch (saveError) {
-      setError(getErrorMessage(saveError))
+      setError(getErrorMessage(saveError));
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   /** コピーは退避専用。原文が変わった後でも確定済みの内容を取り出せる。 */
   const copyCompletedPreview = async () => {
-    if (busy || !completedPreview) return
-    setError('')
+    if (busy || !completedPreview) return;
+    setError("");
     try {
-      await navigator.clipboard.writeText(completedPreview)
-      setNotice('訳済み部分をコピーしました。プレビューは残っています。')
+      await navigator.clipboard.writeText(completedPreview);
+      setNotice("訳済み部分をコピーしました。プレビューは残っています。");
     } catch {
-      setError('コピーに失敗しました。プレビューを選択してコピーしてください。')
+      setError(
+        "コピーに失敗しました。プレビューを選択してコピーしてください。",
+      );
     }
-  }
+  };
 
   const updateTerm = (
     index: number,
     field: keyof GlossaryTerm,
-    value: string
+    value: string,
   ) => {
     setTerms((current) =>
       current.map((term, termIndex) =>
-        termIndex === index ? { ...term, [field]: value } : term
-      )
-    )
-  }
+        termIndex === index ? { ...term, [field]: value } : term,
+      ),
+    );
+  };
 
   return (
     <>
@@ -638,24 +642,24 @@ export default function TranslationToolbar({
               !busy &&
               !saving
             ) {
-              setOpen(false)
+              setOpen(false);
             }
           }}
-          style={embedded ? { height: '100%', minHeight: 0 } : overlayStyle}
+          style={embedded ? { height: "100%", minHeight: 0 } : overlayStyle}
         >
           <section
-            role={embedded ? 'region' : 'dialog'}
+            role={embedded ? "region" : "dialog"}
             aria-modal={embedded ? undefined : true}
             aria-labelledby="local-llm-translation-title"
             style={
               embedded
                 ? {
                     ...dialogStyle,
-                    width: '100%',
-                    height: '100%',
-                    maxHeight: 'none',
+                    width: "100%",
+                    height: "100%",
+                    maxHeight: "none",
                     borderRadius: 0,
-                    boxShadow: 'none',
+                    boxShadow: "none",
                   }
                 : dialogStyle
             }
@@ -670,8 +674,13 @@ export default function TranslationToolbar({
                 >
                   英語翻訳
                 </h2>
-                <div style={{ color: 'var(--content-secondary-themed)', marginTop: 4 }}>
-                  LLM: {selectedModel || '未選択'}
+                <div
+                  style={{
+                    color: "var(--content-secondary-themed)",
+                    marginTop: 4,
+                  }}
+                >
+                  LLM: {selectedModel || "未選択"}
                 </div>
               </div>
               {!embedded && (
@@ -693,7 +702,7 @@ export default function TranslationToolbar({
                   : bodyStyle
               }
             >
-              {getMeta('ol-ExposedSettings')?.llmEnabled && (
+              {getMeta("ol-ExposedSettings")?.llmEnabled && (
                 <p>
                   <a href="/user/llm-settings" target="_blank" rel="noreferrer">
                     LLM Settingsで翻訳の個人接続を設定
@@ -713,16 +722,16 @@ export default function TranslationToolbar({
                   endpointId={endpointId}
                   disabled={busy || saving}
                   onSelect={(id) => {
-                    setEndpointId(id)
-                    setResult(null)
-                    setSnapshot(null)
-                    setCompletedPreview('')
-                    setPartialPreview('')
-                    setSelectedModel('')
-                    void loadModels(id)
+                    setEndpointId(id);
+                    setResult(null);
+                    setSnapshot(null);
+                    setCompletedPreview("");
+                    setPartialPreview("");
+                    setSelectedModel("");
+                    void loadModels(id);
                   }}
                   onChanged={() => {
-                    void loadModels(endpointId, selectedModel)
+                    void loadModels(endpointId, selectedModel);
                   }}
                 />
               )}
@@ -748,7 +757,7 @@ export default function TranslationToolbar({
                 </select>
               </label>
 
-              <fieldset style={{ border: 0, padding: 0, margin: '4px 0 14px' }}>
+              <fieldset style={{ border: 0, padding: 0, margin: "4px 0 14px" }}>
                 <legend style={{ fontWeight: 600, marginBottom: 6 }}>
                   翻訳対象
                 </legend>
@@ -756,37 +765,42 @@ export default function TranslationToolbar({
                   <input
                     type="radio"
                     name="local-llm-target"
-                    checked={target === 'selection'}
+                    checked={target === "selection"}
                     disabled={!hasSelection || busy}
-                    onChange={() => setTarget('selection')}
-                  />{' '}
+                    onChange={() => setTarget("selection")}
+                  />{" "}
                   選択範囲
                 </label>
                 <label>
                   <input
                     type="radio"
                     name="local-llm-target"
-                    checked={target === 'file'}
+                    checked={target === "file"}
                     disabled={busy}
-                    onChange={() => setTarget('file')}
-                  />{' '}
+                    onChange={() => setTarget("file")}
+                  />{" "}
                   現在の .tex ファイル
                 </label>
               </fieldset>
 
               <details style={{ marginBottom: 14 }}>
-                <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+                <summary style={{ cursor: "pointer", fontWeight: 600 }}>
                   用語集・文書コンテキスト・システムプロンプト
                 </summary>
-                <p style={{ color: 'var(--content-secondary-themed)', margin: '8px 0' }}>
+                <p
+                  style={{
+                    color: "var(--content-secondary-themed)",
+                    margin: "8px 0",
+                  }}
+                >
                   用語集・概要・システムプロンプトはプロジェクト単位で保存し、翻訳の各チャンクに渡します。
                 </p>
                 {terms.map((term, index) => (
                   <div
                     key={index}
                     style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 1fr auto',
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr auto",
                       gap: 8,
                       marginBottom: 8,
                     }}
@@ -797,7 +811,7 @@ export default function TranslationToolbar({
                       placeholder="日本語"
                       value={term.source}
                       onChange={(event) =>
-                        updateTerm(index, 'source', event.target.value)
+                        updateTerm(index, "source", event.target.value)
                       }
                     />
                     <input
@@ -806,20 +820,20 @@ export default function TranslationToolbar({
                       placeholder="English"
                       value={term.target}
                       onChange={(event) =>
-                        updateTerm(index, 'target', event.target.value)
+                        updateTerm(index, "target", event.target.value)
                       }
                     />
                     <button
                       type="button"
                       className={
                         embedded
-                          ? 'btn btn-secondary text-wrap'
-                          : 'btn btn-secondary'
+                          ? "btn btn-secondary text-wrap"
+                          : "btn btn-secondary"
                       }
                       aria-label="用語を削除"
                       onClick={() =>
                         setTerms((current) =>
-                          current.filter((_, i) => i !== index)
+                          current.filter((_, i) => i !== index),
                         )
                       }
                     >
@@ -831,13 +845,13 @@ export default function TranslationToolbar({
                   type="button"
                   className={
                     embedded
-                      ? 'btn btn-secondary text-wrap'
-                      : 'btn btn-secondary'
+                      ? "btn btn-secondary text-wrap"
+                      : "btn btn-secondary"
                   }
                   onClick={() =>
                     setTerms((current) => [
                       ...current,
-                      { source: '', target: '' },
+                      { source: "", target: "" },
                     ])
                   }
                 >
@@ -862,7 +876,7 @@ export default function TranslationToolbar({
                     maxLength={4000}
                     value={promptInstructions}
                     placeholder={
-                      '空欄なら既定のシステムプロンプトを使います。例:\n' +
+                      "空欄なら既定のシステムプロンプトを使います。例:\n" +
                       defaultPrompt
                     }
                     onChange={(event) =>
@@ -872,33 +886,34 @@ export default function TranslationToolbar({
                 </label>
                 <p
                   style={{
-                    color: 'var(--content-secondary-themed)',
-                    margin: '4px 0 8px',
+                    color: "var(--content-secondary-themed)",
+                    margin: "4px 0 8px",
                     fontSize: 12,
                   }}
                 >
-                  空欄 = 既定文。翻訳のトーン・役割の指示だけ差し替わります。保護マーカー維持などの
+                  空欄 =
+                  既定文。翻訳のトーン・役割の指示だけ差し替わります。保護マーカー維持などの
                   検証前提の指示は常に自動で添えられます。
                 </p>
                 <button
                   type="button"
                   className={
                     embedded
-                      ? 'btn btn-secondary text-wrap'
-                      : 'btn btn-secondary'
+                      ? "btn btn-secondary text-wrap"
+                      : "btn btn-secondary"
                   }
                   disabled={saving || busy}
                   onClick={() => void saveSettings()}
                 >
-                  {saving ? '保存中…' : '用語集・プロンプトを保存'}
+                  {saving ? "保存中…" : "用語集・プロンプトを保存"}
                 </button>
-                {promptInstructions !== '' && (
+                {promptInstructions !== "" && (
                   <button
                     type="button"
                     className={
                       embedded
-                        ? 'btn btn-secondary text-wrap'
-                        : 'btn btn-secondary'
+                        ? "btn btn-secondary text-wrap"
+                        : "btn btn-secondary"
                     }
                     disabled={saving || busy}
                     onClick={() => void resetPromptToDefault()}
@@ -910,10 +925,10 @@ export default function TranslationToolbar({
 
               <label
                 style={{
-                  display: 'flex',
+                  display: "flex",
                   gap: 8,
-                  alignItems: 'flex-start',
-                  margin: '8px 0 14px',
+                  alignItems: "flex-start",
+                  margin: "8px 0 14px",
                 }}
               >
                 <input
@@ -933,7 +948,7 @@ export default function TranslationToolbar({
                     embedded
                       ? {
                           ...previewGridStyle,
-                          gridTemplateColumns: 'minmax(0, 1fr)',
+                          gridTemplateColumns: "minmax(0, 1fr)",
                         }
                       : previewGridStyle
                   }
@@ -956,12 +971,12 @@ export default function TranslationToolbar({
                           )}
                           {busy && !partialPreview && !completedPreview && (
                             <span style={partialPreviewStyle}>
-                              {progress || '翻訳を準備しています。'}
+                              {progress || "翻訳を準備しています。"}
                             </span>
                           )}
                           {!busy &&
                             !completedPreview &&
-                            '翻訳結果はここに表示されます。'}
+                            "翻訳結果はここに表示されます。"}
                         </>
                       )}
                     </pre>
@@ -993,7 +1008,7 @@ export default function TranslationToolbar({
             <footer
               style={
                 embedded
-                  ? { ...footerStyle, padding: 12, flexDirection: 'column' }
+                  ? { ...footerStyle, padding: 12, flexDirection: "column" }
                   : footerStyle
               }
             >
@@ -1006,20 +1021,20 @@ export default function TranslationToolbar({
                   翻訳を停止
                 </button>
               ) : result ? (
-                snapshot?.target === 'file' ? (
+                snapshot?.target === "file" ? (
                   <>
                     <button
                       type="button"
                       className={
                         embedded
-                          ? 'btn btn-secondary text-wrap'
-                          : 'btn btn-secondary'
+                          ? "btn btn-secondary text-wrap"
+                          : "btn btn-secondary"
                       }
                       disabled={!canApply || saving}
                       title={
                         canApply
                           ? undefined
-                          : '翻訳中に文書が変更されました。翻訳し直してください。'
+                          : "翻訳中に文書が変更されました。翻訳し直してください。"
                       }
                       onClick={() => saveEnglishDocument(false)}
                     >
@@ -1029,31 +1044,31 @@ export default function TranslationToolbar({
                       type="button"
                       className={
                         embedded
-                          ? 'btn btn-primary text-wrap'
-                          : 'btn btn-primary'
+                          ? "btn btn-primary text-wrap"
+                          : "btn btn-primary"
                       }
                       disabled={!canApply || saving}
                       title={
                         canApply
                           ? undefined
-                          : '翻訳中に文書が変更されました。翻訳し直してください。'
+                          : "翻訳中に文書が変更されました。翻訳し直してください。"
                       }
                       onClick={() => saveEnglishDocument(true)}
                     >
-                      {saving ? '保存中…' : '保存し英語版をメイン文書に'}
+                      {saving ? "保存中…" : "保存し英語版をメイン文書に"}
                     </button>
                   </>
                 ) : (
                   <button
                     type="button"
                     className={
-                      embedded ? 'btn btn-primary text-wrap' : 'btn btn-primary'
+                      embedded ? "btn btn-primary text-wrap" : "btn btn-primary"
                     }
                     disabled={!canApply || saving}
                     title={
                       canApply
                         ? undefined
-                        : '翻訳中に文書が変更されました。翻訳し直してください。'
+                        : "翻訳中に文書が変更されました。翻訳し直してください。"
                     }
                     onClick={applyResult}
                   >
@@ -1064,33 +1079,31 @@ export default function TranslationToolbar({
                 <>
                   {completedPreview && snapshot && (
                     <>
-                      {snapshot.target === 'file' && (
+                      {snapshot.target === "file" && (
                         <button
                           type="button"
                           className={
                             embedded
-                              ? 'btn btn-primary text-wrap'
-                              : 'btn btn-primary'
+                              ? "btn btn-primary text-wrap"
+                              : "btn btn-primary"
                           }
                           disabled={!canApply || saving}
                           title={
                             canApply
                               ? undefined
-                              : '原文または権限が変わりました。現在の文書で翻訳し直してください。'
+                              : "原文または権限が変わりました。現在の文書で翻訳し直してください。"
                           }
                           onClick={() => saveEnglishDocument(false)}
                         >
-                          {saving
-                            ? '保存中…'
-                            : '訳済み部分だけ .en.tex に保存'}
+                          {saving ? "保存中…" : "訳済み部分だけ .en.tex に保存"}
                         </button>
                       )}
                       <button
                         type="button"
                         className={
                           embedded
-                            ? 'btn btn-secondary text-wrap'
-                            : 'btn btn-secondary'
+                            ? "btn btn-secondary text-wrap"
+                            : "btn btn-secondary"
                         }
                         disabled={saving}
                         onClick={copyCompletedPreview}
@@ -1102,7 +1115,7 @@ export default function TranslationToolbar({
                   <button
                     type="button"
                     className={
-                      embedded ? 'btn btn-primary text-wrap' : 'btn btn-primary'
+                      embedded ? "btn btn-primary text-wrap" : "btn btn-primary"
                     }
                     disabled={
                       !editorAvailable ||
@@ -1122,92 +1135,92 @@ export default function TranslationToolbar({
         </div>
       )}
     </>
-  )
+  );
 }
 
 // ---- パネルの装飾用スタイル（インライン style 用の定数群） ------------------
 // Overleaf 本体の SCSS に依存せず、ツールバー登録でも崩れないよう固定値で持っています。
 
 const overlayStyle: CSSProperties = {
-  position: 'fixed',
+  position: "fixed",
   inset: 0,
   zIndex: 10000,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
   padding: 20,
-  background: 'rgba(0, 0, 0, 0.45)',
-}
+  background: "rgba(0, 0, 0, 0.45)",
+};
 
 const dialogStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  width: 'min(1100px, 96vw)',
-  maxHeight: '92vh',
-  background: 'var(--bg-primary-themed)',
-  color: 'var(--content-primary-themed)',
+  display: "flex",
+  flexDirection: "column",
+  width: "min(1100px, 96vw)",
+  maxHeight: "92vh",
+  background: "var(--bg-primary-themed)",
+  color: "var(--content-primary-themed)",
   borderRadius: 8,
-  boxShadow: '0 12px 40px rgba(0, 0, 0, 0.3)',
-}
+  boxShadow: "0 12px 40px rgba(0, 0, 0, 0.3)",
+};
 
 const headerStyle: CSSProperties = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'center',
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
   gap: 20,
-  padding: '16px 20px',
-  borderBottom: '1px solid var(--border-primary-themed)',
-}
+  padding: "16px 20px",
+  borderBottom: "1px solid var(--border-primary-themed)",
+};
 
 const bodyStyle: CSSProperties = {
   padding: 20,
-  overflow: 'auto',
-}
+  overflow: "auto",
+};
 
 const footerStyle: CSSProperties = {
-  display: 'flex',
-  justifyContent: 'flex-end',
+  display: "flex",
+  justifyContent: "flex-end",
   gap: 8,
-  padding: '12px 20px',
-  borderTop: '1px solid var(--border-primary-themed)',
-}
+  padding: "12px 20px",
+  borderTop: "1px solid var(--border-primary-themed)",
+};
 
 const fieldStyle: CSSProperties = {
-  display: 'block',
+  display: "block",
   fontWeight: 600,
   marginBottom: 14,
-}
+};
 
 const previewGridStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
   gap: 16,
-  margin: '10px 0 16px',
-}
+  margin: "10px 0 16px",
+};
 
 const previewStyle: CSSProperties = {
   minHeight: 160,
   maxHeight: 300,
-  overflow: 'auto',
+  overflow: "auto",
   padding: 12,
-  margin: '6px 0 0',
-  whiteSpace: 'pre-wrap',
-  overflowWrap: 'anywhere',
-  background: 'var(--bg-secondary-themed)',
-  border: '1px solid var(--border-primary-themed)',
+  margin: "6px 0 0",
+  whiteSpace: "pre-wrap",
+  overflowWrap: "anywhere",
+  background: "var(--bg-secondary-themed)",
+  border: "1px solid var(--border-primary-themed)",
   borderRadius: 4,
   fontSize: 13,
-}
+};
 
 const partialPreviewStyle: CSSProperties = {
-  color: 'var(--content-secondary-themed)',
+  color: "var(--content-secondary-themed)",
   opacity: 0.75,
-  fontStyle: 'italic',
-}
+  fontStyle: "italic",
+};
 
 const progressStyle: CSSProperties = {
   minHeight: 20,
   marginTop: 5,
-  color: 'var(--content-secondary-themed)',
+  color: "var(--content-secondary-themed)",
   fontSize: 12,
-}
+};
