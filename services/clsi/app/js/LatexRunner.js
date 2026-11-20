@@ -21,6 +21,27 @@ const COMPILER_FLAGS = {
   lualatex: '-lualatex',
   pdflatex: '-pdf',
   xelatex: '-xelatex',
+  // pLaTeX/upLaTeX は latexmk 標準フラグを持たないため、下記オーバーライドで
+  // $latex を差し替えて -pdfdvi 経路（dvipdfmx 変換）で動かす。
+  platex: '-pdfdvi',
+  uplatex: '-pdfdvi',
+}
+
+// 日本語エンジン用の latexmk -e 引数。コンテナ内は UTF-8 ストレートなので
+// -kanji=utf8 と入力エンコーディング推測オフを必ず付ける。
+const JAPANESE_ENGINE_LATEXMK_OVERRIDES = {
+  platex: [
+    '-e',
+    '$latex=q/platex -kanji=utf8 -no-guess-input-enc %O %S/',
+    '-e',
+    '$dvipdf=q/dvipdfmx %O -o %D %S/',
+  ],
+  uplatex: [
+    '-e',
+    '$latex=q/uplatex -kanji=utf8 -no-guess-input-enc %O %S/',
+    '-e',
+    '$dvipdf=q/dvipdfmx %O -o %D %S/',
+  ],
 }
 
 function runLatex(projectId, options, callback) {
@@ -201,6 +222,10 @@ function _buildLatexCommand(mainFile, opts = {}) {
   const compilerFlag = COMPILER_FLAGS[opts.compiler]
   if (compilerFlag) {
     command.push(compilerFlag)
+    const japaneseOverrides = JAPANESE_ENGINE_LATEXMK_OVERRIDES[opts.compiler]
+    if (japaneseOverrides) {
+      command.push(...japaneseOverrides)
+    }
   } else {
     throw new Error(`unknown compiler: ${opts.compiler}`)
   }

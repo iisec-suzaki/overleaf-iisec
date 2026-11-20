@@ -75,7 +75,8 @@ const httpPermissionsPolicy = {
   },
 }
 
-const safeCompilers = ['xelatex', 'pdflatex', 'latex', 'lualatex']
+// 日本語組版エンジン platex/uplatex を追加（iisec。TeX Live 同梱バイナリ使用）
+const safeCompilers = ['xelatex', 'pdflatex', 'latex', 'lualatex', 'uplatex', 'platex']
 
 module.exports = {
   env: 'server-ce',
