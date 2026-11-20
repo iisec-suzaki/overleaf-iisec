@@ -669,10 +669,9 @@ export default function LLMAdminSettingsPage() {
                   type="check_circle"
                   className="llm-settings-section-status-icon"
                 />
-                {t(
-                  'scan_found_models',
-                  `Found ${availableModels.length} model(s)`
-                )}
+                {t('scan_found_models', 'Found __count__ model(s)', {
+                  count: availableModels.length,
+                })}
               </span>
             )}
             {scanStatus === 'error' && (
