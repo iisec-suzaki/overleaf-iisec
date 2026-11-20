@@ -8,6 +8,8 @@ import { useEditorOpenDocContext } from '@/features/ide-react/context/editor-ope
 import { useEditorManagerContext } from '@/features/ide-react/context/editor-manager-context'
 import { usePermissionsContext } from '@/features/ide-react/context/permissions-context'
 import { useProjectContext } from '@/shared/context/project-context'
+import withErrorBoundary from '@/infrastructure/error-boundary'
+import PanelErrorFallback from '../panel-error-fallback'
 import TranslationToolbar from '../TranslationToolbar'
 import {
   getBridgedEditor,
@@ -15,7 +17,7 @@ import {
   type BridgedEditor,
 } from './editor-bridge'
 
-export default function TranslationPanel() {
+function TranslationPanel() {
   const { projectId } = useProjectContext()
   // プロジェクトを移った際は、旧プロジェクトの訳・接続設定を引き継がない。
   return <ProjectTranslationPanel key={projectId} />
@@ -62,3 +64,6 @@ function ProjectTranslationPanel() {
     </CodeMirrorViewContext.Provider>
   )
 }
+
+// 描画クラッシュ時も日本語のエラー表示が残るよう、エラー境界で包んで公開する。
+export default withErrorBoundary(TranslationPanel, PanelErrorFallback)

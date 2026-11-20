@@ -24,6 +24,10 @@ const mock = vi.hoisted(() => ({
   view: null as unknown,
 }))
 vi.mock('@codemirror/language', () => ({ language: {} }))
+// エラー境界は Sentry 設定を参照するため、テストでは素通しにする。
+vi.mock('@/infrastructure/error-boundary', () => ({
+  default: (component: unknown) => component,
+}))
 vi.mock('@/features/ide-react/context/editor-open-doc-context', () => ({
   useEditorOpenDocContext: () => ({
     currentDocumentId: mock.docId,

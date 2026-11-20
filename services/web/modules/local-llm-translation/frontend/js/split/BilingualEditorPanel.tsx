@@ -44,6 +44,8 @@ import {
   CodeMirrorViewContext,
 } from '@/features/source-editor/components/codemirror-context'
 import BilingualEditorToolbar from './BilingualEditorToolbar'
+import withErrorBoundary from '@/infrastructure/error-boundary'
+import PanelErrorFallback from '../panel-error-fallback'
 
 type Session = { id: string; view: EditorView; version: number; saved: string }
 const errorMessage = (error: unknown) =>
@@ -425,7 +427,7 @@ function restoreTabs(key: string): { ids: string[]; active: string } {
   }
 }
 
-export default function BilingualEditorPanel({ order }: { order?: number }) {
+function BilingualEditorPanel({ order }: { order?: number }) {
   const { projectId } = useProjectContext()
   return <ProjectBilingualEditor key={projectId} order={order} />
 }
@@ -625,8 +627,8 @@ function ProjectBilingualEditor({ order }: { order?: number }) {
             minHeight: 0,
             display: 'flex',
             flexDirection: 'column',
-            color: 'var(--content-primary)',
-            background: 'var(--bg-primary)',
+            color: 'var(--content-primary-themed)',
+            background: 'var(--bg-primary-themed)',
           }}
         >
           <header
@@ -745,3 +747,6 @@ function ProjectBilingualEditor({ order }: { order?: number }) {
     </>
   )
 }
+
+// 描画クラッシュ時も日本語のエラー表示が残るよう、エラー境界で包んで公開する。
+export default withErrorBoundary(BilingualEditorPanel, PanelErrorFallback)

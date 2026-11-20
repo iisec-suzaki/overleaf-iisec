@@ -654,7 +654,7 @@ export default function TranslationToolbar({
                 >
                   日本語から英語へ翻訳
                 </h2>
-                <div style={{ color: '#666', marginTop: 4 }}>
+                <div style={{ color: 'var(--content-secondary-themed)', marginTop: 4 }}>
                   LLM: {selectedModel || '未選択'}
                 </div>
               </div>
@@ -762,7 +762,7 @@ export default function TranslationToolbar({
                 <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
                   用語集と文書コンテキスト
                 </summary>
-                <p style={{ color: '#666', margin: '8px 0' }}>
+                <p style={{ color: 'var(--content-secondary-themed)', margin: '8px 0' }}>
                   用語集と概要はプロジェクト単位で保存し、翻訳の各チャンクに渡します。
                 </p>
                 {terms.map((term, index) => (
@@ -1113,8 +1113,8 @@ const dialogStyle: CSSProperties = {
   flexDirection: 'column',
   width: 'min(1100px, 96vw)',
   maxHeight: '92vh',
-  background: '#fff',
-  color: '#222',
+  background: 'var(--bg-primary-themed)',
+  color: 'var(--content-primary-themed)',
   borderRadius: 8,
   boxShadow: '0 12px 40px rgba(0, 0, 0, 0.3)',
 }
@@ -1125,7 +1125,7 @@ const headerStyle: CSSProperties = {
   alignItems: 'center',
   gap: 20,
   padding: '16px 20px',
-  borderBottom: '1px solid #ddd',
+  borderBottom: '1px solid var(--border-primary-themed)',
 }
 
 const bodyStyle: CSSProperties = {
@@ -1138,7 +1138,7 @@ const footerStyle: CSSProperties = {
   justifyContent: 'flex-end',
   gap: 8,
   padding: '12px 20px',
-  borderTop: '1px solid #ddd',
+  borderTop: '1px solid var(--border-primary-themed)',
 }
 
 const fieldStyle: CSSProperties = {
@@ -1162,14 +1162,14 @@ const previewStyle: CSSProperties = {
   margin: '6px 0 0',
   whiteSpace: 'pre-wrap',
   overflowWrap: 'anywhere',
-  background: '#f6f6f6',
-  border: '1px solid #ddd',
+  background: 'var(--bg-secondary-themed)',
+  border: '1px solid var(--border-primary-themed)',
   borderRadius: 4,
   fontSize: 13,
 }
 
 const partialPreviewStyle: CSSProperties = {
-  color: '#858585',
+  color: 'var(--content-secondary-themed)',
   opacity: 0.75,
   fontStyle: 'italic',
 }
@@ -1177,6 +1177,6 @@ const partialPreviewStyle: CSSProperties = {
 const progressStyle: CSSProperties = {
   minHeight: 20,
   marginTop: 5,
-  color: '#858585',
+  color: 'var(--content-secondary-themed)',
   fontSize: 12,
 }

@@ -43,6 +43,10 @@ const tree = {
   ],
   fileRefs: [],
 }
+// エラー境界は Sentry 設定を参照するため、テストでは素通しにする。
+vi.mock('@/infrastructure/error-boundary', () => ({
+  default: (component: unknown) => component,
+}))
 vi.mock('@/shared/context/project-context', () => ({
   useProjectContext: () => ({ projectId: 'project' }),
 }))
