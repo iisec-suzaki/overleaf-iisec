@@ -3,7 +3,10 @@ import getMeta from '@/utils/meta'
 
 export default function LLMUserSection() {
   const { t } = useTranslation()
-  if (!getMeta('ol-ExposedSettings').llmEnabled) return null
+  const exposed = getMeta('ol-ExposedSettings')
+  // fork 準拠：ユーザー用 LLM 設定の表示は llmAllowUserSettings でも制御される
+  // （LLM 自体が無効なときは出さない）。
+  if (!exposed.llmEnabled || !exposed.llmAllowUserSettings) return null
   return (
     <section className="mb-4">
       <h2>{t('llm_section_title', 'AI assistant')}</h2>
