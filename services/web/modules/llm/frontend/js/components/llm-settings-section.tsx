@@ -708,12 +708,15 @@ export default function LLMSettingsSection({
 
           <OLFormGroup>
             <OLFormLabel>
-              {t('llm_byo_reasoning', 'Reasoning effort (chat)')}
+              {t('llm_byo_reasoning', 'Reasoning effort (chat default)')}
             </OLFormLabel>
             {/* Native select: OLFormControl は input を描画するため select は
                 ネイティブ要素のまま使う（上の providerType と同じ理由）。 */}
             <select
-              aria-label={t('llm_byo_reasoning', 'Reasoning effort (chat)')}
+              aria-label={t(
+                'llm_byo_reasoning',
+                'Reasoning effort (chat default)'
+              )}
               className="form-select"
               value={draft.reasoningEffort}
               onChange={e => setField('reasoningEffort', e.target.value)}
@@ -730,7 +733,7 @@ export default function LLMSettingsSection({
             <OLFormText variant="text">
               {t(
                 'llm_byo_reasoning_note',
-                'Sent as reasoning_effort on chat requests to OpenAI-compatible backends (vLLM, Strata, ...). Other lanes keep the backend default.'
+                'Default reasoning_effort sent on chat requests to OpenAI-compatible backends (vLLM, Strata, ...). A choice in the chat pane overrides it for that session.'
               )}
             </OLFormText>
           </OLFormGroup>
