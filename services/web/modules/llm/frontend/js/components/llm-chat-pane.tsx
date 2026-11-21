@@ -7,6 +7,10 @@ import LLMChatResponse from './llm-chat-response'
 // chat リクエストに添えるため、生のコンテキストを安全に読む（未提供でも落ちない）。
 import { EditorOpenDocContext } from '@/features/ide-react/context/editor-open-doc-context'
 import { FileTreePathContext } from '@/features/file-tree/contexts/file-tree-path'
+import { useLLMModelSelection } from '../hooks/use-llm-model-selection'
+import LLMOptionDropdown, {
+  LLMOptionItem,
+} from './llm-option-dropdown'
 import '../../stylesheets/llm-chat.scss'
 
 interface LLMChatPaneProps {
@@ -84,6 +88,94 @@ const LLMChatPane = React.memo(function LLMChatPane({
       // 同上。
     }
   }, [userEffort])
+
+  // overleaf-lab (owner request 2026-11-21, 第3改): モデル／推論レベルを
+  // Editing/Reviewing 切替と同じ見た目のドロップダウンにし、チャット上部で
+  // 横並び選択できるようにした（llm-option-dropdown 共有コンポーネント）。
+  const models = useLLMModelSelection()
+  const modelItems: LLMOptionItem[] = [
+    {
+      value: '',
+      label: '既定のモデル',
+      description: '接続設定の優先順位で選択',
+      leadingIcon: 'tune',
+      active: models.selected === '',
+    },
+    ...models.options.map(option => ({
+      value: option.value,
+      label: option.label,
+      toggleLabel: option.rowName
+        ? `${option.rowName} · ${option.label}`
+        : option.label,
+      description: option.rowName || 'サイト共通',
+      leadingIcon: option.value.startsWith('u:') ? 'memory' : 'cloud',
+      active: models.selected === option.value,
+    })),
+  ]
+  const effortItems: LLMOptionItem[] = isPersonalModel
+    ? (
+        [
+          {
+            value: '',
+            label: '既定（接続設定に従う）',
+            description: '個人接続の行設定の値を使用',
+            leadingIcon: 'tune',
+          },
+          {
+            value: 'high',
+            label: '高',
+            description: 'しっかり考えてから回答',
+            leadingIcon: 'psychology',
+          },
+          {
+            value: 'medium',
+            label: '中',
+            description: '思考と速度のバランス',
+            leadingIcon: 'psychology',
+          },
+          {
+            value: 'low',
+            label: '低',
+            description: '控えめに思考',
+            leadingIcon: 'psychology',
+          },
+          {
+            value: 'minimal',
+            label: '最小',
+            description: '必要な時だけ最小限に思考',
+            leadingIcon: 'psychology',
+          },
+          {
+            value: 'none',
+            label: 'なし（最速）',
+            description: '推論オフで速度優先',
+            leadingIcon: 'bolt',
+          },
+        ] as LLMOptionItem[]
+      ).map(item => ({ ...item, active: userEffort === item.value }))
+    : (
+        [
+          {
+            value: 'medium',
+            label: '中（推奨）',
+            description: '思考を有効にして回答（既定）',
+            leadingIcon: 'psychology',
+          },
+          {
+            value: 'none',
+            label: 'なし（最速）',
+            description: '推論オフで速度優先',
+            leadingIcon: 'bolt',
+          },
+        ] as LLMOptionItem[]
+      ).map(item => ({ ...item, active: siteEffort === item.value }))
+  const chooseEffort = (value: string) => {
+    if (isPersonalModel) {
+      setUserEffort(value as '' | 'none' | 'minimal' | 'low' | 'medium' | 'high')
+    } else {
+      setSiteEffort(value as 'none' | 'medium')
+    }
+  }
 
   // ---- プロジェクト TeX 自動参照（2026-11-13 の運用者要望） -----------------
   // 編集中ファイルの相対パスを自動参照の先頭に置くため、編集中ドキュメントと
@@ -169,6 +261,35 @@ const LLMChatPane = React.memo(function LLMChatPane({
                     gone — the ONLY selection entry point is File → "Select LLM Model".
                     The chat keeps using the shared (user-scoped) selection, synced
                     inside use-llm-chat via the LLM_MODEL_CHANGED_EVENT bridge. */}
+        <div className="llm-chat-options-row">
+          <LLMOptionDropdown
+            id="llm-model-switcher"
+            ariaLabel="チャットのモデル"
+            icon="smart_toy"
+            items={modelItems}
+            onSelect={value => models.apply(value)}
+            disabled={!models.loaded || models.saving}
+            title={models.saveError || undefined}
+          />
+          <LLMOptionDropdown
+            id="llm-reasoning-switcher"
+            ariaLabel="チャットの推論レベル"
+            icon="psychology"
+            items={effortItems}
+            onSelect={chooseEffort}
+            disabled={isLoading}
+            title={
+              isPersonalModel
+                ? '個人接続の既定値を上書きします。「既定」は接続設定の値を使います'
+                : undefined
+            }
+          />
+        </div>
+        {currentFile && (
+          <div className="llm-options-file" title={currentFile}>
+            編集中: {currentFile}
+          </div>
+        )}
         <div className="llm-chat-header">
           <div className="llm-action-buttons">
             {canRerun && !isLoading && (
@@ -335,46 +456,7 @@ const LLMChatPane = React.memo(function LLMChatPane({
             />
             編集中の本文・選択範囲を添付（ソースエディター使用時）
           </label>
-          <label className="llm-reasoning-choice">
-            推論レベル
-            {isPersonalModel ? (
-              <select
-                value={userEffort}
-                onChange={e =>
-                  setUserEffort(
-                    e.target.value as
-                      | ''
-                      | 'none'
-                      | 'minimal'
-                      | 'low'
-                      | 'medium'
-                      | 'high'
-                  )
-                }
-                disabled={isLoading}
-                title="個人接続の既定値を上書きします。「既定」は接続設定の値を使います"
-              >
-                <option value="">既定（接続設定に従う）</option>
-                <option value="high">高</option>
-                <option value="medium">中</option>
-                <option value="low">低</option>
-                <option value="minimal">最小</option>
-                <option value="none">なし（最速）</option>
-              </select>
-            ) : (
-              <select
-                value={siteEffort}
-                onChange={e =>
-                  setSiteEffort(e.target.value as 'none' | 'medium')
-                }
-                disabled={isLoading}
-              >
-                <option value="medium">中（推奨）</option>
-                <option value="none">なし（最速）</option>
-              </select>
-            )}
-          </label>
-          {currentFile && <span>編集中: {currentFile}</span>}
+          {/* 推論レベルは上部のドロップダウン（llm-chat-options-row）へ移動済み */}
           <span>
             プロジェクトの自動参照はLLM設定に従います。変更案は確認して適用できます。
           </span>
