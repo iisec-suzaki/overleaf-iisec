@@ -43,10 +43,10 @@ export interface ChatExtras {
   currentFile?: string
   // false で自動参照をオフ（チェックボックスの OFF 状態）。
   projectContext?: boolean
-  // 共有（site）lane の推論レベル（2026-11-21 の運用者要望、同日改定）。
-  // 'medium' = 思考が発火する最小レベル / 'none' = 推論なし。個人 BYO lane
-  // ではこの値は無視され、接続先行に保存した推論レベルが使われる。
-  reasoningEffort?: 'none' | 'medium'
+  // 推論レベル（2026-11-21 の運用者要望、同日2改）。site lane ではサーバーが
+  // 'none'|'medium' に収束（既定 medium）。個人 BYO lane では明示選択が行設定
+  // を上書きし、undefined（既定）のときだけ行設定の値へフォールバックする。
+  reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high'
 }
 
 export const useLLMChat = () => {
@@ -202,8 +202,8 @@ export const useLLMChat = () => {
               currentFile:
                 editorContext?.file || effectiveExtras.currentFile || undefined,
               projectContext: effectiveExtras.projectContext !== false,
-              // 共有 lane の推論レベル（site のときだけサーバーが有効化、
-              // 'none'|'minimal' のホワイトリストはサーバー側で強制）。
+              // 推論レベル（site はサーバーが none|medium に収束、BYO は
+              // 明示値が行設定を上書き、undefined は行設定へフォールバック）。
               reasoningEffort: effectiveExtras.reasoningEffort,
             },
             signal: controller.signal,

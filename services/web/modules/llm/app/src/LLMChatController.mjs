@@ -475,24 +475,27 @@ async function chat(req, res) {
       ]
     : [{ role: 'system', content: systemPreamble }, ...messages]
 
-  // overleaf-lab (owner request 2026-11-21, 同日改定): チャットの推論レベル方針。
+  // overleaf-lab (owner request 2026-11-21, 同日2改): チャットの推論レベル方針。
   //  site lane : サーバーが選ぶ2段階のみ「none」|「medium」（既定 medium）。
   //              Strata iq3_s 実測で minimal/none は思考0トークンのため
   //              minimal を廃止、実際に思考が発火する最小が medium。
   //              旧クライアントの 'minimal' 送信は medium に丸めます。
-  //  user BYO  : プロバイダー行に保存した値を使用（/user/llm-settings の
-  //              個人設定、'' = パラメータを送らずバックエンド既定）。
+  //  user BYO  : チャットペーンで利用者が選んだ値が最優先（行設定の上書き）。
+  //              未選択（既定）や不正値のときだけ プロバイダー行に保存した
+  //              値へフォールバックし、それも '' ならパラメータを送らず
+  //              バックエンド既定。つまり行設定=既定値、ペーン=都度上書き。
   //              openaiCompatible 行のみ — anthropic/openai は別の
   //              オプション体系のため従来動作のまま。
+  const USER_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high']
   let chatReasoningEffort
   if (lane === 'site' && spec.providerType === 'openaiCompatible') {
     chatReasoningEffort = req.body.reasoningEffort === 'none' ? 'none' : 'medium'
-  } else if (
-    lane === 'user' &&
-    spec.providerType === 'openaiCompatible' &&
-    ['none', 'minimal', 'low', 'medium', 'high'].includes(rowReasoningEffort)
-  ) {
-    chatReasoningEffort = rowReasoningEffort
+  } else if (lane === 'user' && spec.providerType === 'openaiCompatible') {
+    chatReasoningEffort = USER_EFFORTS.includes(req.body.reasoningEffort)
+      ? req.body.reasoningEffort
+      : USER_EFFORTS.includes(rowReasoningEffort)
+        ? rowReasoningEffort
+        : undefined
   }
 
   const started = Date.now()
