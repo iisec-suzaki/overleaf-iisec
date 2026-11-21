@@ -43,6 +43,10 @@ export interface ChatExtras {
   currentFile?: string
   // false で自動参照をオフ（チェックボックスの OFF 状態）。
   projectContext?: boolean
+  // 共有（site）lane の推論レベル（2026-11-21 の運用者要望）。
+  // 'minimal' = 一番軽い推論 / 'none' = 推論なし。個人 BYO lane では
+  // サーバー側で無視される（サーバーが 'none'|'minimal' のみ受理）。
+  reasoningEffort?: 'none' | 'minimal'
 }
 
 export const useLLMChat = () => {
@@ -154,6 +158,7 @@ export const useLLMChat = () => {
       // 再実行（rerun）では extras を引き継ぐため ref にも保持する。
       const effectiveExtras: ChatExtras = extras ?? {
         includeEditor: extrasRef.current.includeEditor,
+        reasoningEffort: extrasRef.current.reasoningEffort,
       }
       extrasRef.current = effectiveExtras
       const newMessages: Message[] = [
@@ -197,6 +202,9 @@ export const useLLMChat = () => {
               currentFile:
                 editorContext?.file || effectiveExtras.currentFile || undefined,
               projectContext: effectiveExtras.projectContext !== false,
+              // 共有 lane の推論レベル（site のときだけサーバーが有効化、
+              // 'none'|'minimal' のホワイトリストはサーバー側で強制）。
+              reasoningEffort: effectiveExtras.reasoningEffort,
             },
             signal: controller.signal,
             swallowAbortError: false,

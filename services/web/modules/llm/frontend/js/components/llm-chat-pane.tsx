@@ -29,6 +29,7 @@ const LLMChatPane = React.memo(function LLMChatPane({
     stopGeneration,
     rerunLastMessage,
     clearMessages,
+    selectedModel,
     canRerun,
     modelsLoaded,
     hasModels,
@@ -42,6 +43,26 @@ const LLMChatPane = React.memo(function LLMChatPane({
 
   const [inputValue, setInputValue] = useState('')
   const [includeEditor, setIncludeEditor] = useState(true)
+
+  // overleaf-lab (owner request 2026-11-21): 共有（site）lane の推論レベル。
+  // 'minimal' = 一番軽い推論（既定）/ 'none' = 推論なし。選択は localStorage
+  // で記憶する。個人 BYO モデル（ID が 'u:' 名前空間）はプロバイダー側の
+  // 挙動に任せるため、このコントロールは表示しない（サーバーも無視する）。
+  const isPersonalModel = selectedModel.startsWith('u:')
+  const [reasoningEffort, setReasoningEffort] = useState<'none' | 'minimal'>(
+    () =>
+      typeof window !== 'undefined' &&
+      window.localStorage.getItem('llm-chat-reasoning-effort') === 'none'
+        ? 'none'
+        : 'minimal'
+  )
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('llm-chat-reasoning-effort', reasoningEffort)
+    } catch {
+      // 保存できない環境（プライベートモード等）では記憶しないだけ。
+    }
+  }, [reasoningEffort])
 
   // ---- プロジェクト TeX 自動参照（2026-11-13 の運用者要望） -----------------
   // 編集中ファイルの相対パスを自動参照の先頭に置くため、編集中ドキュメントと
@@ -69,7 +90,11 @@ const LLMChatPane = React.memo(function LLMChatPane({
       // 自動参照: 編集中ファイルのパスを添えて送信する（ON/OFF はサーバーの
       // ユーザー設定。画面側のスイッチは設定画面へ移動済み）。
       followMessages.current = true
-      sendMessage(inputValue, undefined, { currentFile, includeEditor })
+      sendMessage(inputValue, undefined, {
+        currentFile,
+        includeEditor,
+        reasoningEffort,
+      })
       setInputValue('')
     }
   }
@@ -289,6 +314,21 @@ const LLMChatPane = React.memo(function LLMChatPane({
             />
             編集中の本文・選択範囲を添付（ソースエディター使用時）
           </label>
+          {!isPersonalModel && (
+            <label className="llm-reasoning-choice">
+              推論レベル
+              <select
+                value={reasoningEffort}
+                onChange={e =>
+                  setReasoningEffort(e.target.value as 'none' | 'minimal')
+                }
+                disabled={isLoading}
+              >
+                <option value="minimal">軽（推奨）</option>
+                <option value="none">なし（最速）</option>
+              </select>
+            </label>
+          )}
           {currentFile && <span>編集中: {currentFile}</span>}
           <span>
             プロジェクトの自動参照はLLM設定に従います。変更案は確認して適用できます。

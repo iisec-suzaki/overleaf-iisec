@@ -473,9 +473,29 @@ async function chat(req, res) {
       ]
     : [{ role: 'system', content: systemPreamble }, ...messages]
 
+  // overleaf-lab (owner request 2026-11-21): chat-pane reasoning-effort
+  // control for the shared (site) lane only. Two cheap levels are offered
+  // ("none" | "minimal"); an absent/unknown value falls back to "minimal",
+  // the lightest thinking, so the shared endpoint never runs unbounded
+  // reasoning just because a client omitted the field. Personal BYO lanes
+  // are deliberately untouched — their reasoning behaviour is the user's.
+  const chatReasoningEffort =
+    lane === 'site' && spec.providerType === 'openaiCompatible'
+      ? req.body.reasoningEffort === 'none'
+        ? 'none'
+        : 'minimal'
+      : undefined
+
   const started = Date.now()
   logger.info(
-    { projectId, lane, model, messages: messages.length, timeout: 300000 },
+    {
+      projectId,
+      lane,
+      model,
+      messages: messages.length,
+      timeout: 300000,
+      ...(chatReasoningEffort ? { reasoningEffort: chatReasoningEffort } : {}),
+    },
     '[LLM] chat: sending request'
   )
   try {
@@ -484,6 +504,16 @@ async function chat(req, res) {
       temperature: 0.7,
       timeoutMs: 300000,
       usageMeta: { userId, action: 'chat', lane, projectId }, // overleaf-lab (usage meter)
+      // overleaf-lab: @ai-sdk/openai-compatible reads providerOptions under
+      // the provider's own name (createModel uses 'overleaf-llm') and maps
+      // reasoningEffort to the wire field `reasoning_effort`.
+      ...(chatReasoningEffort
+        ? {
+            providerOptions: {
+              'overleaf-llm': { reasoningEffort: chatReasoningEffort },
+            },
+          }
+        : {}),
     })
     assertNonEmpty(text)
     budget.record(usage?.outputTokens)
