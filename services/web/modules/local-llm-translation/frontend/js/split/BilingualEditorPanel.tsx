@@ -5,6 +5,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from 'react-resizable-panels'
+import classNames from 'classnames'
+import MaterialIcon from '@/shared/components/material-icon'
 import { Compartment, EditorState } from '@codemirror/state'
 import { EditorView, keymap, lineNumbers } from '@codemirror/view'
 import {
@@ -625,8 +627,8 @@ function ProjectBilingualEditor({ order }: { order?: number }) {
             minHeight: 0,
             display: 'flex',
             flexDirection: 'column',
-            color: 'var(--content-primary)',
-            background: 'var(--bg-primary)',
+            color: 'var(--content-primary-themed)',
+            background: 'var(--bg-primary-themed)',
           }}
         >
           <header
@@ -674,54 +676,66 @@ function ProjectBilingualEditor({ order }: { order?: number }) {
               横並びを閉じる
             </button>
           </header>
-          <div
-            role="tablist"
-            aria-label="横並びの文書"
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 4,
-              padding: '0 12px 8px',
-            }}
-          >
-            {ids.map(id => (
-              <div key={id} style={{ display: 'flex' }}>
-                <button
-                  type="button"
+          {/* メインタブと同じ .editor-file-tab 系のスタイルを使ったタブバー
+              （伊藤さん試作 port/complete-sync c9e89d9482 の SplitFilePanel 準拠。
+              クラスは pages/editor/tabs.scss がエディターページ全体に効く） */}
+          <div className="editor-tabs-container">
+            <div className="editor-tabs-row" role="tablist" aria-label="横並びの文書">
+              {ids.map(id => (
+                <div
+                  key={id}
                   role="tab"
                   id={`bilingual-tab-${id}`}
                   aria-controls={`bilingual-panel-${id}`}
                   aria-selected={active === id}
                   aria-label={label(id)}
-                  className={`btn btn-sm ${active === id ? 'btn-primary' : 'btn-secondary'}`}
+                  className={classNames('editor-file-tab', {
+                    'tab-selected': active === id,
+                  })}
                   onClick={() => {
                     setActive(id)
                     setNotice('')
                   }}
                 >
-                  {label(id)}
-                  {statuses[id]?.dirty && <span aria-hidden="true"> •</span>}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-secondary"
-                  aria-label={`${label(id)} を左のエディターへ移す`}
-                  disabled={Boolean(moving) || statuses[id]?.saving}
-                  onClick={() => void moveLeft(id)}
-                >
-                  ←
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-secondary"
-                  aria-label={`${label(id)} のタブを閉じる`}
-                  disabled={statuses[id]?.saving}
-                  onClick={() => closeTab(id)}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
+                  <div className="editor-file-tab-content">
+                    <span className="editor-file-tab-icon">
+                      <MaterialIcon type="description" size="2x" />
+                    </span>
+                    <div className="editor-file-tab-path" title={label(id)}>
+                      &lrm;{label(id)}
+                      {statuses[id]?.dirty ? ' •' : ''}
+                    </div>
+                    <div className="editor-file-tab-action">
+                      <button
+                        type="button"
+                        className="editor-file-tab-close-action"
+                        aria-label={`${label(id)} を左のエディターへ移す`}
+                        title="このタブを左のエディターへ移す"
+                        disabled={Boolean(moving) || statuses[id]?.saving}
+                        onClick={event => {
+                          event.stopPropagation()
+                          void moveLeft(id)
+                        }}
+                      >
+                        <MaterialIcon type="arrow_back_ios_new" size="2x" />
+                      </button>
+                      <button
+                        type="button"
+                        className="editor-file-tab-close-action"
+                        aria-label={`${label(id)} のタブを閉じる`}
+                        disabled={statuses[id]?.saving}
+                        onClick={event => {
+                          event.stopPropagation()
+                          closeTab(id)
+                        }}
+                      >
+                        <MaterialIcon type="close" size="2x" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
           {notice && (
             <p role="status" className="px-3">

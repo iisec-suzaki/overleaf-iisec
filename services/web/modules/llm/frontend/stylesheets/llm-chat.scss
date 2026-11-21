@@ -10,89 +10,32 @@
   // overleaf-lab: upstream-AI (writefull-style) restyle — values from the
   // shared token layer (frontend/stylesheets/llm-ui.scss, --wf-*).
   // Fallbacks keep the previous themed behavior if a token is missing.
-  --wf-panel-bg: #fafafa;
-  --wf-panel-text: #1e293b;
-  --wf-panel-border: #e3e8ef;
-  --wf-panel-shadow: 0 10px 30px rgba(2, 8, 20, 0.1);
-  --wf-row-hi: #ffffff;
-  --wf-row-hover: #eef1f5;
-  --wf-border-in: #dfe5ec;
-  --wf-muted: #475569;
-  --wf-code-bg: #f1f4f8;
-  --wf-accent: #28518f;
-  --wf-accent-hi: #214475;
-  --wf-accent-soft: rgba(40, 81, 143, 0.08);
 
-  --llm-chat-bg: var(--wf-panel-bg, var(--bg-primary, transparent));
-  --llm-chat-color: var(
-    --wf-panel-text,
-    var(--content-primary-themed, inherit)
-  );
-  --llm-chat-text-color: var(
-    --wf-panel-text,
-    var(--content-primary-themed, inherit)
-  );
-  --llm-chat-instructions-color: var(
-    --wf-muted,
-    var(--content-secondary, #6c757d)
-  );
+  --llm-chat-bg: var(--wf-panel-bg, var(--bg-primary-themed, transparent));
+  --llm-chat-color: var(--content-primary-themed, inherit);
+  --llm-chat-text-color: var(--content-primary-themed, inherit);
+  --llm-chat-instructions-color: var(--content-secondary-themed, #6c757d);
   --llm-chat-new-message-bg: transparent;
-  --llm-chat-new-message-textarea-color: var(
-    --wf-panel-text,
-    var(--content-primary-themed, inherit)
-  );
-  --llm-chat-new-message-textarea-bg: var(
-    --wf-row-hi,
-    var(--bg-primary, transparent)
-  );
-  --llm-chat-new-message-textarea-border: var(
-    --wf-border-in,
-    var(--border-primary, rgba(125, 125, 125, 0.35))
-  );
-  --llm-chat-new-message-border: var(
-    --wf-panel-border,
-    var(--border-primary, rgba(125, 125, 125, 0.2))
-  );
+  --llm-chat-new-message-textarea-color: var(--content-primary-themed, inherit);
+  --llm-chat-new-message-textarea-bg: var(--bg-primary-themed, transparent);
+  --llm-chat-new-message-textarea-border: var(--border-primary-themed, rgba(125, 125, 125, 0.35));
+  --llm-chat-new-message-border: var(--border-primary-themed, rgba(125, 125, 125, 0.2));
   /* user chip = brand accent (upstream navy), assistant bubble = raised card */
   --llm-chat-message-user-bg: var(--wf-accent, var(--green-70, #2b8a5f));
   --llm-chat-message-user-text: var(--white, #fff);
   --llm-chat-message-assistant-bg: var(--wf-row-hi, rgba(125, 125, 125, 0.14));
-  --llm-chat-message-assistant-text: var(
-    --wf-panel-text,
-    var(--content-primary-themed, inherit)
-  );
+  --llm-chat-message-assistant-text: var(--content-primary-themed, inherit);
   --llm-chat-code-bg: var(--wf-code-bg, rgba(125, 125, 125, 0.18));
-  --llm-chat-code-text: var(
-    --wf-panel-text,
-    var(--content-primary-themed, inherit)
-  );
+  --llm-chat-code-text: var(--content-primary-themed, inherit);
 
   /* LLM-specific fallbacks for suggestion items and selector */
   --llm-chat-suggestions-bg: var(--wf-row-hi, rgba(125, 125, 125, 0.1));
-  --llm-chat-suggestions-color: var(
-    --wf-panel-text,
-    var(--content-primary-themed, inherit)
-  );
-  --llm-chat-suggestions-title-color: var(
-    --wf-muted,
-    var(--content-primary-themed, inherit)
-  );
-  --llm-chat-suggestion-item-bg: var(
-    --wf-row-hi,
-    var(--bg-primary, transparent)
-  );
-  --llm-chat-suggestion-item-color: var(
-    --wf-panel-text,
-    var(--content-primary-themed, inherit)
-  );
-  --llm-model-selector-label-color: var(
-    --wf-muted,
-    var(--content-primary-themed, inherit)
-  );
-  --llm-model-selector-select-color: var(
-    --wf-panel-text,
-    var(--content-primary-themed, inherit)
-  );
+  --llm-chat-suggestions-color: var(--content-primary-themed, inherit);
+  --llm-chat-suggestions-title-color: var(--content-primary-themed, inherit);
+  --llm-chat-suggestion-item-bg: var(--bg-primary-themed, transparent);
+  --llm-chat-suggestion-item-color: var(--content-primary-themed, inherit);
+  --llm-model-selector-label-color: var(--content-primary-themed, inherit);
+  --llm-model-selector-select-color: var(--content-primary-themed, inherit);
   /* Max width used by suggestions and model selector */
   --llm-suggestions-max-width: 350px;
 }
@@ -106,47 +49,30 @@
 // against the editor-derived --wf-* values on that element — the chat pane and
 // every chat surface then follow the Editor theme, exactly like the toolbar.
 .llm-wf-editor-scoped {
-  --llm-chat-bg: var(--wf-panel-bg, #fafafa);
-  --llm-chat-color: var(--wf-panel-text, #1e293b);
-  --llm-chat-text-color: var(--wf-panel-text, #1e293b);
-  --llm-chat-instructions-color: var(--wf-muted, #475569);
+  --llm-chat-bg: var(--wf-panel-bg, var(--bg-primary-themed));
+  --llm-chat-color: var(--wf-panel-text, var(--content-primary-themed));
+  --llm-chat-text-color: var(--wf-panel-text, var(--content-primary-themed));
+  --llm-chat-instructions-color: var(--wf-muted, var(--content-secondary-themed));
   --llm-chat-new-message-bg: transparent;
-  --llm-chat-new-message-textarea-color: var(--wf-panel-text, #1e293b);
-  --llm-chat-new-message-textarea-bg: var(--wf-row-hi, #fff);
-  --llm-chat-new-message-textarea-border: var(--wf-border-in, #dfe5ec);
-  --llm-chat-new-message-border: var(--wf-panel-border, #e3e8ef);
+  --llm-chat-new-message-textarea-color: var(--wf-panel-text, var(--content-primary-themed));
+  --llm-chat-new-message-textarea-bg: var(--wf-row-hi, var(--bg-secondary-themed));
+  --llm-chat-new-message-textarea-border: var(--wf-border-in, var(--border-primary-themed));
+  --llm-chat-new-message-border: var(--wf-panel-border, var(--border-primary-themed));
   --llm-chat-message-user-bg: var(--wf-accent, #28518f);
   --llm-chat-message-user-text: #fff;
-  --llm-chat-message-assistant-bg: var(--wf-row-hi, #fff);
-  --llm-chat-message-assistant-text: var(--wf-panel-text, #1e293b);
-  --llm-chat-code-bg: var(--wf-code-bg, #f1f4f8);
-  --llm-chat-code-text: var(--wf-panel-text, #1e293b);
-  --llm-chat-suggestions-bg: var(--wf-row-hi, #fff);
-  --llm-chat-suggestions-color: var(--wf-panel-text, #1e293b);
-  --llm-chat-suggestions-title-color: var(--wf-muted, #475569);
-  --llm-chat-suggestion-item-bg: var(--wf-row-hi, #fff);
-  --llm-chat-suggestion-item-color: var(--wf-panel-text, #1e293b);
-  --llm-model-selector-label-color: var(--wf-muted, #475569);
-  --llm-model-selector-select-color: var(--wf-panel-text, #1e293b);
+  --llm-chat-message-assistant-bg: var(--wf-row-hi, var(--bg-secondary-themed));
+  --llm-chat-message-assistant-text: var(--wf-panel-text, var(--content-primary-themed));
+  --llm-chat-code-bg: var(--wf-code-bg, var(--bg-secondary-themed));
+  --llm-chat-code-text: var(--wf-panel-text, var(--content-primary-themed));
+  --llm-chat-suggestions-bg: var(--wf-row-hi, var(--bg-secondary-themed));
+  --llm-chat-suggestions-color: var(--wf-panel-text, var(--content-primary-themed));
+  --llm-chat-suggestions-title-color: var(--wf-muted, var(--content-secondary-themed));
+  --llm-chat-suggestion-item-bg: var(--wf-row-hi, var(--bg-secondary-themed));
+  --llm-chat-suggestion-item-color: var(--wf-panel-text, var(--content-primary-themed));
+  --llm-model-selector-label-color: var(--wf-muted, var(--content-secondary-themed));
+  --llm-model-selector-select-color: var(--wf-panel-text, var(--content-primary-themed));
 }
 
-// overleaf-lab: dark-theme values for the --wf-* tokens. Top-level
-// [data-bs-theme=dark] (attribute on <html>, the same selector shape the app
-// itself uses) so the variables flip in place and everything below inherits.
-[data-bs-theme='dark'] {
-  --wf-panel-bg: #1b222c;
-  --wf-panel-text: #e2e8f0;
-  --wf-panel-border: #2f3a4d;
-  --wf-panel-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
-  --wf-row-hi: #212a36;
-  --wf-row-hover: #26303d;
-  --wf-border-in: #2f3a4d;
-  --wf-muted: #94a3b8;
-  --wf-code-bg: #141a22;
-  --wf-accent: #6597e0;
-  --wf-accent-hi: #7dabec;
-  --wf-accent-soft: rgba(101, 151, 224, 0.14);
-}
 
 .llm-rail-panel {
   display: flex;
@@ -247,7 +173,7 @@
     color: var(--wf-panel-text, var(--content-primary-themed));
     font-size: var(--font-size-02);
     outline: none;
-    border-color: var(--border-primary);
+    border-color: var(--border-primary-themed);
     min-width: 0;
     width: 200px;
     flex: 0 1 auto;
@@ -275,7 +201,7 @@
     }
 
     &:focus {
-      border-color: var(--border-primary);
+      border-color: var(--border-primary-themed);
     }
 
     &:disabled {
@@ -314,13 +240,13 @@
   transition: all 0.2s ease;
 
   &:hover {
-    background-color: var(--bg-light-tertiary);
+    background-color: var(--bg-tertiary-themed);
     color: var(--content-primary-themed);
     border-color: var(--border-secondary);
   }
 
   &:focus-visible {
-    outline: 2px solid var(--border-primary);
+    outline: 2px solid var(--border-primary-themed);
     outline-offset: 2px;
   }
 
@@ -392,7 +318,7 @@
   h3 {
     font-size: var(--font-size-02);
     font-weight: 600;
-    color: var(--content-primary);
+    color: var(--content-primary-themed);
     margin-bottom: 10px;
   }
 
@@ -590,10 +516,10 @@
         }
 
         blockquote {
-          border-left: 3px solid var(--border-primary);
+          border-left: 3px solid var(--border-primary-themed);
           padding-left: var(--spacing-04);
           margin: var(--spacing-03) 0;
-          color: var(--content-secondary);
+          color: var(--content-secondary-themed);
           font-style: italic;
         }
 
@@ -610,7 +536,7 @@
           }
 
           th {
-            background-color: var(--bg-light-tertiary);
+            background-color: var(--bg-tertiary-themed);
             font-weight: 600;
           }
         }
@@ -736,7 +662,7 @@
 
     &:focus {
       outline: none;
-      border-color: var(--border-primary);
+      border-color: var(--border-primary-themed);
     }
 
     &:disabled {
@@ -825,7 +751,7 @@
   min-width: 0;
   margin-top: 8px;
   padding: 10px;
-  border: 1px solid var(--border-primary);
+  border: 1px solid var(--border-primary-themed);
   border-radius: 6px;
   color: var(--content-primary-themed);
   background: var(--llm-chat-message-assistant-bg);
@@ -858,7 +784,7 @@
 .llm-chat-welcome .llm-suggestions button {
   color: inherit;
   background: var(--llm-chat-new-message-textarea-bg);
-  border: 1px solid var(--border-primary);
+  border: 1px solid var(--border-primary-themed);
   border-radius: 4px;
   padding: 6px 10px;
   cursor: pointer;
@@ -887,7 +813,7 @@
   }
   .llm-chat-diff {
     padding: 0;
-    border: 1px solid var(--border-primary);
+    border: 1px solid var(--border-primary-themed);
   }
   .llm-diff-line {
     display: grid;
@@ -994,3 +920,97 @@
     box-shadow: inset 3px 0 #22863a;
   }
 }
+
+// overleaf-lab (2026-11-21 第3改): チャット上部のモデル／推論レベル選択。
+// Editing/Reviewing 切替（review-mode-switcher）と同じピル型トグル＋メニュー。
+// メニュー項目の見た目（タイトル＋説明／active）はグローバルの
+// dropdown-menu.scss をそのまま流用している。
+.llm-chat-options-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-02, 4px);
+  flex-wrap: wrap;
+  padding: 8px 8px 4px;
+  border-bottom: 1px solid var(--border-divider-themed, rgba(125, 125, 125, 0.2));
+
+}
+
+.llm-options-file {
+  /* オプション行の直下（兄弟要素）に移動済み。flex line の
+     幅の奪い合いに参加しないのでピルは必ず grow で広がる。 */
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 8px 4px;
+  font-size: 11px;
+  color: var(--content-secondary-themed);
+}
+
+.llm-option-dropdown {
+  min-width: 0;
+
+  > .dropdown-menu {
+    margin-top: 2px;
+    max-width: 320px;
+
+    .dropdown-item {
+      white-space: normal;
+    }
+  }
+
+  .llm-option-dropdown-toggle {
+    all: unset;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    max-width: 100%;
+    gap: var(--spacing-01, 2px);
+    border-radius: 14px;
+    font-size: 12px;
+    padding: var(--spacing-01, 2px) var(--spacing-02, 6px);
+    background-color: var(--bg-secondary-themed);
+    color: var(--content-primary-themed);
+    cursor: pointer;
+
+    .material-symbols {
+      font-size: 16px;
+    }
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--content-primary-themed);
+      outline-offset: 2px;
+    }
+  }
+
+  .llm-option-dropdown-label {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* モデル／推論ピルは basis:0 の等配分（grow:1）で必ず同幅1行に並べる。
+   ファイル名（flex-basis:100%）は flex-wrap により自動的に2行目へ回り、
+   1行目の幅の奪い合いに参加しない（これが以前の潰れ・折返りの原因）。 */
+.llm-chat-options-row > .llm-option-dropdown {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.llm-chat-options-row > .llm-option-dropdown:first-of-type .llm-option-dropdown-label {
+  flex: 1 1 auto;
+  max-width: none;
+}
+
+

@@ -10,27 +10,16 @@
 // the brand navy scale, and the upstream dark surfaces); consumers reference
 // the --wf-* variables only.
 //
-// Theme switching follows the app's own mechanism: Bootstrap's
-// [data-bs-theme="dark"] on <html> (core flips --content-primary-themed & co.
-// under the same attribute, so these fixed values stay in sync with the IDE).
+// Theme switching follows the app's own mechanism (verified against core):
+// useThemedPage sets body[data-theme] to 'default' (dark) or 'light', and
+// core's own token layer treats DARK as the :root default with
+// [data-theme='light'] as the override (see abstracts/
+// themes-common-variables.scss + mixins.scss $themes: default light).
+// NOTE: an earlier revision keyed these blocks off [data-bs-theme='dark'],
+// which core never sets on <html> — the block was dead and every surface
+// stayed on light colors under the dark theme (unreadable dark-on-dark).
 :root {
-  // surface
-  --wf-panel-bg: #fafafa;
-  --wf-panel-text: #1e293b;
-  --wf-panel-border: #e3e8ef;
-  --wf-panel-shadow: 0 10px 30px rgba(2, 8, 20, 0.1);
-  --wf-row-hi: #ffffff;
-  --wf-row-hover: #eef1f5;
-  --wf-border-in: #dfe5ec;
-  --wf-muted: #475569;
-  --wf-code-bg: #f1f4f8;
-  // accent (brand navy)
-  --wf-accent: #28518f;
-  --wf-accent-hi: #214475;
-  --wf-accent-soft: rgba(40, 81, 143, 0.08);
-}
-
-[data-bs-theme='dark'] {
+  // surface (dark = the app default theme)
   --wf-panel-bg: #1b222c;
   --wf-panel-text: #e2e8f0;
   --wf-panel-border: #2f3a4d;
@@ -40,9 +29,25 @@
   --wf-border-in: #2f3a4d;
   --wf-muted: #94a3b8;
   --wf-code-bg: #141a22;
+  // accent (light-blue reads on the dark slate surfaces)
   --wf-accent: #6597e0;
   --wf-accent-hi: #7dabec;
   --wf-accent-soft: rgba(101, 151, 224, 0.14);
+}
+
+[data-theme='light'] {
+  --wf-panel-bg: #fafafa;
+  --wf-panel-text: #1e293b;
+  --wf-panel-border: #e3e8ef;
+  --wf-panel-shadow: 0 10px 30px rgba(2, 8, 20, 0.1);
+  --wf-row-hi: #ffffff;
+  --wf-row-hover: #eef1f5;
+  --wf-border-in: #dfe5ec;
+  --wf-muted: #475569;
+  --wf-code-bg: #f1f4f8;
+  --wf-accent: #28518f;
+  --wf-accent-hi: #214475;
+  --wf-accent-soft: rgba(40, 81, 143, 0.08);
 }
 
 // Generator-modal result surface (upstream result-panel language: a raised,
@@ -180,9 +185,10 @@
   // everything derives from the editor's own colors; otherwise the fixed
   // upstream palette from :root applies. color-mix lines are dropped whole
   // on browsers without support, where the plain :root values still win.
-  --wf-panel-bg: var(--wf-editor-bg, #fafafa);
-  --wf-panel-text: var(--wf-editor-fg, #1e293b);
-  --wf-row-hi: var(--wf-editor-bg, #fff);
+  --wf-panel-bg: var(--wf-editor-bg, var(--bg-primary-themed));
+  --wf-panel-text: var(--wf-editor-fg, var(--content-primary-themed));
+  --wf-row-hi: var(--wf-editor-bg, var(--bg-secondary-themed));
+  --wf-muted: color-mix(in srgb, var(--wf-panel-text) 68%, var(--wf-panel-bg));
   --wf-row-hover: color-mix(
     in srgb,
     var(--wf-panel-text) 9%,
@@ -206,9 +212,28 @@
   --wf-accent: #28518f;
   --wf-accent-hi: #214475;
   --wf-accent-soft: rgba(40, 81, 143, 0.1);
+
+  // In-scope retarget: dozens of consumer rules (welcome card list items,
+  // borders, code blocks, headings, inputs) still reference the core
+  // body-theme tokens directly instead of the --llm-chat-* chain.
+  // Repointing the core tokens themselves inside the scope makes every one
+  // of those rules — current and future — follow the editor theme without
+  // a per-rule rewrite. Cycles stay dormant while the bridge supplies
+  // --wf-editor-bg/-fg (fallback branches are not substituted when the
+  // primary resolves); with no bridge the IACVT chain inherits the body
+  // palette, i.e. exactly the pre-bridge behavior.
+  --content-primary-themed: var(--wf-panel-text);
+  --content-secondary-themed: var(--wf-muted);
+  --bg-primary-themed: var(--wf-panel-bg);
+  --bg-secondary-themed: var(--wf-row-hi);
+  --border-primary-themed: var(--wf-panel-border);
 }
 
-[data-bs-theme='dark'] .llm-wf-editor-scoped {
+// Dark overall theme with the bridge not having run yet: brand navy is
+// unreadable on dark derived surfaces, so fall back to the light-blue scale.
+// (When the editor bridge has run, llm-editor-theme.ts already flips the
+// accent based on the editor background's luminance.)
+body[data-theme='default'] .llm-wf-editor-scoped {
   --wf-accent: #6597e0;
   --wf-accent-hi: #7dabec;
   --wf-accent-soft: rgba(101, 151, 224, 0.16);
