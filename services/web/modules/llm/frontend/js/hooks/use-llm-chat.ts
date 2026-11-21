@@ -43,10 +43,10 @@ export interface ChatExtras {
   currentFile?: string
   // false で自動参照をオフ（チェックボックスの OFF 状態）。
   projectContext?: boolean
-  // 共有（site）lane の推論レベル（2026-11-21 の運用者要望）。
-  // 'minimal' = 一番軽い推論 / 'none' = 推論なし。個人 BYO lane では
-  // サーバー側で無視される（サーバーが 'none'|'minimal' のみ受理）。
-  reasoningEffort?: 'none' | 'minimal'
+  // 共有（site）lane の推論レベル（2026-11-21 の運用者要望、同日改定）。
+  // 'medium' = 思考が発火する最小レベル / 'none' = 推論なし。個人 BYO lane
+  // ではこの値は無視され、接続先行に保存した推論レベルが使われる。
+  reasoningEffort?: 'none' | 'medium'
 }
 
 export const useLLMChat = () => {

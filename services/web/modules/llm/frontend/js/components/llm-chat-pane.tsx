@@ -44,17 +44,19 @@ const LLMChatPane = React.memo(function LLMChatPane({
   const [inputValue, setInputValue] = useState('')
   const [includeEditor, setIncludeEditor] = useState(true)
 
-  // overleaf-lab (owner request 2026-11-21): 共有（site）lane の推論レベル。
-  // 'minimal' = 一番軽い推論（既定）/ 'none' = 推論なし。選択は localStorage
-  // で記憶する。個人 BYO モデル（ID が 'u:' 名前空間）はプロバイダー側の
-  // 挙動に任せるため、このコントロールは表示しない（サーバーも無視する）。
+  // overleaf-lab (owner request 2026-11-21, 同日改定): 共有（site）lane の推論
+  // レベル。「中(medium)」= 実際に思考が発火する最小レベル（既定）/
+  // 「なし」= 推論オフ。実測で minimal は思考0トークンのため選択肢から除外し、
+  // 旧 localStorage の 'minimal' は読み出し時に medium へ移行する。
+  // 選択は localStorage で記憶する。個人 BYO モデル（ID が 'u:' 名前空間）は
+  // 接続先設定ページ側の保存値を用いるため、このコントロールは表示しない。
   const isPersonalModel = selectedModel.startsWith('u:')
-  const [reasoningEffort, setReasoningEffort] = useState<'none' | 'minimal'>(
+  const [reasoningEffort, setReasoningEffort] = useState<'none' | 'medium'>(
     () =>
       typeof window !== 'undefined' &&
       window.localStorage.getItem('llm-chat-reasoning-effort') === 'none'
         ? 'none'
-        : 'minimal'
+        : 'medium'
   )
   useEffect(() => {
     try {
@@ -320,11 +322,11 @@ const LLMChatPane = React.memo(function LLMChatPane({
               <select
                 value={reasoningEffort}
                 onChange={e =>
-                  setReasoningEffort(e.target.value as 'none' | 'minimal')
+                  setReasoningEffort(e.target.value as 'none' | 'medium')
                 }
                 disabled={isLoading}
               >
-                <option value="minimal">軽（推奨）</option>
+                <option value="medium">中（推奨）</option>
                 <option value="none">なし（最速）</option>
               </select>
             </label>

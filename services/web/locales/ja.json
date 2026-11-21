@@ -586,5 +586,8 @@
   "zotero_reference_loading_error": "エラー。Zoteroからリファレンスを読み込むことができませんでした",
   "zotero_reference_loading_error_expired": "Zoteroトークンの期限が切れました。アカウントを再リンクしてください",
   "zotero_reference_loading_error_forbidden": "Zoteroのリファレンスを読み込むことができませんでした。アカウントを再リンクして、再度お試しください",
-  "zotero_sync_description": "Zoteroを統合すると、Zoteroから__appName__プロジェクトにリファレンスをインポートすることができます。"
+  "zotero_sync_description": "Zoteroを統合すると、Zoteroから__appName__プロジェクトにリファレンスをインポートすることができます。",
+  "llm_byo_reasoning": "推論レベル（チャット）",
+  "llm_byo_reasoning_default": "バックエンド既定（パラメータを送らない）",
+  "llm_byo_reasoning_note": "OpenAI互換バックエンド（vLLM, Strata …）へのチャット要求で reasoning_effort として送ります。それ以外はバックエンド既定のまま。"
 }

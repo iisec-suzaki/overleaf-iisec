@@ -376,6 +376,7 @@ async function chat(req, res) {
   let lane
   let spec
   let model
+  let rowReasoningEffort = ''
   try {
     const resolved = await resolveLane(
       userId,
@@ -385,6 +386,7 @@ async function chat(req, res) {
     lane = resolved.lane
     spec = resolved.spec
     model = resolved.model
+    rowReasoningEffort = resolved.row?.reasoningEffort || ''
   } catch (err) {
     return sendError(res, err, 400)
   }
@@ -473,18 +475,25 @@ async function chat(req, res) {
       ]
     : [{ role: 'system', content: systemPreamble }, ...messages]
 
-  // overleaf-lab (owner request 2026-11-21): chat-pane reasoning-effort
-  // control for the shared (site) lane only. Two cheap levels are offered
-  // ("none" | "minimal"); an absent/unknown value falls back to "minimal",
-  // the lightest thinking, so the shared endpoint never runs unbounded
-  // reasoning just because a client omitted the field. Personal BYO lanes
-  // are deliberately untouched — their reasoning behaviour is the user's.
-  const chatReasoningEffort =
-    lane === 'site' && spec.providerType === 'openaiCompatible'
-      ? req.body.reasoningEffort === 'none'
-        ? 'none'
-        : 'minimal'
-      : undefined
+  // overleaf-lab (owner request 2026-11-21, 同日改定): チャットの推論レベル方針。
+  //  site lane : サーバーが選ぶ2段階のみ「none」|「medium」（既定 medium）。
+  //              Strata iq3_s 実測で minimal/none は思考0トークンのため
+  //              minimal を廃止、実際に思考が発火する最小が medium。
+  //              旧クライアントの 'minimal' 送信は medium に丸めます。
+  //  user BYO  : プロバイダー行に保存した値を使用（/user/llm-settings の
+  //              個人設定、'' = パラメータを送らずバックエンド既定）。
+  //              openaiCompatible 行のみ — anthropic/openai は別の
+  //              オプション体系のため従来動作のまま。
+  let chatReasoningEffort
+  if (lane === 'site' && spec.providerType === 'openaiCompatible') {
+    chatReasoningEffort = req.body.reasoningEffort === 'none' ? 'none' : 'medium'
+  } else if (
+    lane === 'user' &&
+    spec.providerType === 'openaiCompatible' &&
+    ['none', 'minimal', 'low', 'medium', 'high'].includes(rowReasoningEffort)
+  ) {
+    chatReasoningEffort = rowReasoningEffort
+  }
 
   const started = Date.now()
   logger.info(
