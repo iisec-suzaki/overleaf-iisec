@@ -1,0 +1,138 @@
+# ベースイメージ（TeX Live 一式 → 日本語 LaTeX 環境）のビルド複合アクションです。
+# 呼び出し元の job 権限をそのまま継承します（複合アクションは権限を宣言しない
+# ため、書き込み権限を持つ main ワークフローと読み取り専用の PR ワークフローの
+# 両方から同じ定義で使えます）。
+#
+# タグは Dockerfile 内容のハッシュ（tex-<hash> / ja-<hash>）。GHCR に既存なら
+# ビルドせず即終了します。push_image='false' ではビルド検証のみで公開しません。
+name: build-base-images
+description: 'ベースイメージ 2 段（TeX Live / 日本語環境）を内容ハッシュタグでビルド・公開'
+
+inputs:
+  push_image:
+    description: "'true' のとき GHCR へ push する（検証実行では 'false'）"
+    required: true
+
+outputs:
+  tex_tag:
+    description: 'TeX Live ベースイメージのコンテンツハッシュタグ'
+    value: ${{ steps.ci-hash.outputs.tex_tag }}
+  ja_tag:
+    description: '日本語 LaTeX ベースイメージのコンテンツハッシュタグ'
+    value: ${{ steps.ci-hash.outputs.ja_tag }}
+  base_missing:
+    description: "push できない状態で GHCR に該当ハッシュが無い場合 'true'"
+    value: ${{ steps.ci-resolve.outputs.base_missing }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set push mode
+      id: ci-pushmode
+      shell: bash
+      run: |
+        if [ "${{ inputs.push_image }}" = "true" ]; then
+          echo "SHOULD_PUSH=true" >> "$GITHUB_ENV"
+        else
+          echo "SHOULD_PUSH=false" >> "$GITHUB_ENV"
+        fi
+
+    - name: Compute content-hash tags
+      id: ci-hash
+      shell: bash
+      env:
+        BASE_IMAGE: ghcr.io/iisec-suzaki/overleaf-iisec-base
+      run: |
+        tex_hash="$(sha256sum server-ce/Dockerfile-base | awk '{ print substr($1, 1, 12) }')"
+        ja_hash="$(cat server-ce/Dockerfile-base Dockerfile.jp-base | sha256sum | awk '{ print substr($1, 1, 12) }')"
+        echo "tex_tag=tex-${tex_hash}" >> "$GITHUB_OUTPUT"
+        echo "ja_tag=ja-${ja_hash}" >> "$GITHUB_OUTPUT"
+
+    - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+    # 既存タグの確認（imagetools inspect）と private package のプルにトークンが要ります。
+    # 実効権限が read の job（PR）では push 系引数が付かないため書き込み操作は起きません。
+    - name: Log in to GHCR
+      uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+
+    - name: Check if the base image already exists
+      id: ci-inspect
+      shell: bash
+      env:
+        JA_BASE_IMAGE: ghcr.io/iisec-suzaki/overleaf-iisec-ja-base
+      run: |
+        if docker buildx imagetools inspect "$JA_BASE_IMAGE:${{ steps.ci-hash.outputs.ja_tag }}" >/dev/null 2>&1; then
+          echo "base_missing=false" >> "$GITHUB_OUTPUT"
+          echo "GHCR に既存: $JA_BASE_IMAGE:${{ steps.ci-hash.outputs.ja_tag }}"
+        else
+          echo "base_missing=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Build base image (TeX Live full)
+      if: steps.ci-inspect.outputs.base_missing == 'true'
+      shell: bash
+      env:
+        BASE_IMAGE: ghcr.io/iisec-suzaki/overleaf-iisec-base
+        CACHE_IMAGE: ghcr.io/iisec-suzaki/overleaf-iisec-buildcache
+      run: |
+        cache_from=(--cache-from "type=registry,ref=$CACHE_IMAGE:base")
+        cache_to=()
+        push=()
+        if [ "$SHOULD_PUSH" = "true" ]; then
+          cache_to=(--cache-to "type=registry,mode=max,image-manifest=true,oci=true,ref=$CACHE_IMAGE:base")
+          push=(--push -t "$BASE_IMAGE:latest")
+        fi
+        docker buildx build \
+          --platform linux/amd64 \
+          "${cache_from[@]}" "${cache_to[@]}" \
+          -f server-ce/Dockerfile-base \
+          -t "$BASE_IMAGE:${{ steps.ci-hash.outputs.tex_tag }}" \
+          "${push[@]}" \
+          .
+
+    - name: Build ja-base image (Japanese LaTeX)
+      if: steps.ci-inspect.outputs.base_missing == 'true'
+      shell: bash
+      env:
+        BASE_IMAGE: ghcr.io/iisec-suzaki/overleaf-iisec-base
+        JA_BASE_IMAGE: ghcr.io/iisec-suzaki/overleaf-iisec-ja-base
+        CACHE_IMAGE: ghcr.io/iisec-suzaki/overleaf-iisec-buildcache
+      run: |
+        cache_to=()
+        push=()
+        if [ "$SHOULD_PUSH" = "true" ]; then
+          cache_to=(--cache-to "type=registry,mode=max,image-manifest=true,oci=true,ref=$CACHE_IMAGE:base-ja")
+          push=(--push -t "$JA_BASE_IMAGE:latest")
+        fi
+        docker buildx build \
+          --platform linux/amd64 \
+          --build-arg OVERLEAF_BASE_IMAGE="$BASE_IMAGE:${{ steps.ci-hash.outputs.tex_tag }}" \
+          --cache-from "type=registry,ref=$CACHE_IMAGE:base-ja" \
+          "${cache_to[@]}" \
+          -f Dockerfile.jp-base \
+          -t "$JA_BASE_IMAGE:${{ steps.ci-hash.outputs.ja_tag }}" \
+          "${push[@]}" \
+          .
+
+    - name: Resolve base status
+      id: ci-resolve
+      shell: bash
+      # push 系の job で再ビルドに成功したなら、缺失は解消済みとして報告します。
+      # 読み取り専用の job（PR）で缺失のままのときだけ 'true' を返し、呼び出し元の
+      # アプリ job のスキップ判定に使います。
+      run: |
+        if [ "${{ steps.ci-inspect.outputs.base_missing }}" = "true" ] && [ "$SHOULD_PUSH" != "true" ]; then
+          echo "base_missing=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "base_missing=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Explain PR-only limitation
+      if: steps.ci-inspect.outputs.base_missing == 'true' && inputs.push_image != 'true'
+      shell: bash
+      run: |
+        echo "::warning title=アプリ画像の検証はスキップ::ベースイメージの変更を含む PR では、アプリ画像 (server-ce/Dockerfile) の検証を GHCR 上のベース無しには実行できません。マージ後に base.yml が自動再生成します（翻訳・git-bridge・ベース自体の検証はここで実施済み）。"

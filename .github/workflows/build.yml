@@ -1,6 +1,7 @@
 # main への push と手動実行（workflow_dispatch）で、Docker イメージをビルドして
-# GHCR に公開します。ビルド本体は images.yml（再利用ワークフロー）にあり、
-# PR 検証用（build-pr.yml）と共有しています。
+# GHCR に公開します。ビルド手順は複合アクション（.github/actions/）に集約し、
+# PR 検証用（build-pr.yml）と共有しています。複合アクションは job の権限を
+# 継承するため、このファイルの job だけ packages: write を持ちます。
 #
 # イメージ名・タグの一覧と手動実行手順は doc/ghcr-build.md を参照。
 name: build
@@ -21,22 +22,75 @@ jobs:
   # ベースイメージの存在確認と、缺失時の再生成。通常は「既存を発見して即終了」の
   # 軽量チェックだけで、アプリ変更ではベースは一切再ビルドされません。
   base:
-    uses: ./.github/workflows/base.yml
-    with:
-      push_image: true
-    secrets: inherit
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
     permissions:
       contents: read
       packages: write
+    outputs:
+      ja_tag: ${{ steps.baseimg.outputs.ja_tag }}
+      base_missing: ${{ steps.baseimg.outputs.base_missing }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: baseimg
+        uses: ./.github/actions/build-base-images
+        with:
+          push_image: 'true'
 
-  images:
+  # Overleaf 本体（sharelatex）。compose.yaml の sharelatex サービスと同一の
+  # Dockerfile・ビルド引数です。
+  app:
     needs: base
     if: needs.base.outputs.base_missing != 'true'
-    uses: ./.github/workflows/images.yml
-    with:
-      push_image: true
-      ja_tag: ${{ needs.base.outputs.ja_tag }}
-    secrets: inherit
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
     permissions:
       contents: read
       packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/build-image
+        with:
+          push_image: 'true'
+          image: ghcr.io/iisec-suzaki/overleaf-iisec
+          context: '.'
+          dockerfile: server-ce/Dockerfile
+          cache_scope: app
+          login: 'true'
+          build_args: OVERLEAF_BASE_TAG=ghcr.io/iisec-suzaki/overleaf-iisec-ja-base:${{ needs.base.outputs.ja_tag }}
+
+  # 翻訳サービス（FastAPI）。base イメージに依存しません。
+  translation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/build-image
+        with:
+          push_image: 'true'
+          image: ghcr.io/iisec-suzaki/overleaf-iisec-translation-service
+          context: ./translation-service
+          cache_scope: translation
+
+  # Git 連携ブリッジ。base イメージに依存しません。
+  # Dockerfile.local はコンテキスト内ですが、全ビルドでパスを明示します
+  # （docker-container ドライバーは -f をリポジトリルート基準で解決するため、
+  #  context 基準の「Dockerfile.local」だけだと見つかりません）。
+  git-bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/build-image
+        with:
+          push_image: 'true'
+          image: ghcr.io/iisec-suzaki/overleaf-iisec-git-bridge
+          context: ./services/git-bridge
+          dockerfile: services/git-bridge/Dockerfile.local
+          cache_scope: git-bridge
