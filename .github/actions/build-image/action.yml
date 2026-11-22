@@ -1,0 +1,91 @@
+# 単一 Docker イメージのビルド複合アクションです（Buildx・linux/amd64）。
+# 呼び出し元の job 権限をそのまま継承します（複合アクションは権限を宣言しない）。
+#
+#  - push_image='true': GHCR へ push（refs/heads/main のとき latest も付与）し、
+#    ビルドキャッシュを buildcache パッケージの専用タグへ保存します
+#  - push_image='false': ビルド検証のみ。push・cache-to しません
+name: build-image
+description: 'Buildx で 1 イメージをビルドし、条件付きで GHCR へ公開'
+
+inputs:
+  push_image:
+    description: "'true' のとき GHCR へ push する（検証実行では 'false'）"
+    required: true
+  image:
+    description: '公開先イメージ名（ghcr.io/...、タグ無し）'
+    required: true
+  context:
+    description: 'ビルドコンテキスト（例: ./translation-service、.）'
+    required: true
+  dockerfile:
+    description: "Dockerfile のリポジトリルートからのパス（空なら context 内 Dockerfile）"
+    required: false
+    default: ''
+  cache_scope:
+    description: 'buildcache パッケージ内のキャッシュタグ名（例: app）'
+    required: true
+  build_args:
+    description: '追加 --build-arg（1 行 1 個、NAME=VALUE）'
+    required: false
+    default: ''
+  login:
+    description: "ビルド前に GHCR へログインするか（'true'/'false'。プル専用でも 'true' 可）"
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+    # ベースイメージ等 private package をプルするとき（login='true'）と、
+    # push 実行のときだけログインします。読み取り専用 job でのログインは
+    # 読み取り操作にしか使えません。
+    - name: Log in to GHCR
+      if: inputs.login == 'true' || inputs.push_image == 'true'
+      uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+
+    - name: Build image
+      shell: bash
+      env:
+        PUSH_IMAGE: ${{ inputs.push_image }}
+        INPUT_IMAGE: ${{ inputs.image }}
+        INPUT_CONTEXT: ${{ inputs.context }}
+        INPUT_DOCKERFILE: ${{ inputs.dockerfile }}
+        INPUT_CACHE_SCOPE: ${{ inputs.cache_scope }}
+        INPUT_BUILD_ARGS: ${{ inputs.build_args }}
+        CACHE_IMAGE: ghcr.io/iisec-suzaki/overleaf-iisec-buildcache
+      run: |
+        set -euo pipefail
+        tags=(-t "$INPUT_IMAGE:$GITHUB_SHA")
+        cache_ref="type=registry,ref=$CACHE_IMAGE:$INPUT_CACHE_SCOPE"
+        cache_to=()
+        push=()
+        if [ "$PUSH_IMAGE" = "true" ]; then
+          cache_to=(--cache-to "type=registry,mode=max,image-manifest=true,oci=true,ref=$CACHE_IMAGE:$INPUT_CACHE_SCOPE")
+          push=(--push)
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            tags+=(-t "$INPUT_IMAGE:latest")
+          fi
+        fi
+        dockerfile_args=()
+        if [ -n "$INPUT_DOCKERFILE" ]; then
+          dockerfile_args=(-f "$INPUT_DOCKERFILE")
+        fi
+        build_arg_list=()
+        while IFS= read -r line; do
+          [ -n "$line" ] && build_arg_list+=(--build-arg "$line")
+        done <<< "$INPUT_BUILD_ARGS"
+        docker buildx build \
+          --platform linux/amd64 \
+          --cache-from "$cache_ref" \
+          "${cache_to[@]}" \
+          "${dockerfile_args[@]}" \
+          "${build_arg_list[@]}" \
+          "${tags[@]}" \
+          "${push[@]}" \
+          "$INPUT_CONTEXT"

@@ -11,10 +11,17 @@ GitHub Actions で Docker イメージをビルドし、GitHub Container Registr
 
 | ファイル | 役割 |
 |---|---|
-| `.github/workflows/build.yml` | main push / 手動実行の入口（GHCR へ push あり） |
-| `.github/workflows/build-pr.yml` | PR 検証の入口（読み取り専用。push なし） |
-| `.github/workflows/base.yml` | ベース 2 画像のビルド。単独実行可・上記から再利用 |
-| `.github/workflows/images.yml` | 実画像 3 種のビルド本体（上記 2 入口から共有） |
+| `.github/workflows/build.yml` | main push / 手動実行の入口（`packages: write`） |
+| `.github/workflows/build-pr.yml` | PR 検証の入口（`packages: read` のみ・push なし） |
+| `.github/workflows/base.yml` | ベース 2 画像の単独実行（paths フィルター・手動） |
+| `.github/actions/build-base-images/` | ベースビルド手順の複合アクション |
+| `.github/actions/build-image/` | 1 イメージのビルド手順の複合アクション |
+
+ビルド手順は**複合アクション**に集約し、2 つの入口が同じ定義を共有します。
+複合アクションは job の権限を継承するため、push 用（write）と PR 検証用（read）で
+同じ手順をそのまま使えます。なお再利用ワークフロー（`on: workflow_call`）では
+再利用側の `packages: write` 要求を呼び出し側の read に縮小できず起動時に拒否される
+ため、この方式を採用しています。
 
 ## 公開されるイメージとタグ
 

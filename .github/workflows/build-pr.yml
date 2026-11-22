@@ -1,6 +1,10 @@
 # pull_request でビルド検証のみを行います。GHCR への push も書き込み権限も
-# 一切使いません（job 権限は packages: read。再利用ワークフロー側の write 宣言も
-# ここでの上限で read に制限されます）。ビルド本体は images.yml を共有。
+# 一切使いません（全 job が packages: read。ビルド手順は build.yml と同じ
+# 複合アクションで、push_image='false' により push・cache-to しません）。
+#
+# 参考: 再利用ワークフロー（on: workflow_call）だと、再利用側が宣言する
+# packages: write を呼び出し側の read に縮小できず、起動時に拒否されます。
+# 権限を宣言しない複合アクション（.github/actions/）はこの問題が起きません。
 name: build-pr
 
 on:
@@ -15,25 +19,72 @@ concurrency:
 
 jobs:
   base:
-    uses: ./.github/workflows/base.yml
-    with:
-      push_image: false
-    secrets: inherit
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
     permissions:
       contents: read
       packages: read
+    outputs:
+      ja_tag: ${{ steps.baseimg.outputs.ja_tag }}
+      base_missing: ${{ steps.baseimg.outputs.base_missing }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: baseimg
+        uses: ./.github/actions/build-base-images
+        with:
+          push_image: 'false'
 
-  images:
+  # ベースの Dockerfile を変えた PR では、未公開ベースに依存するアプリ画像の
+  # ビルドは行えません（base job にアノテーションが出ます。翻訳・git-bridge・
+  # ベース自体の検証は base job / 下の job で実施されます）。
+  app:
     needs: base
-    # ベースの Dockerfile を変えた PR では、未公開ベースに依存するアプリ画像の
-    # ビルドは行えません（base job にアノテーションが出ます。翻訳・git-bridge・
-    # ベース自体の検証は base job で実施済みです）。
     if: needs.base.outputs.base_missing != 'true'
-    uses: ./.github/workflows/images.yml
-    with:
-      push_image: false
-      ja_tag: ${{ needs.base.outputs.ja_tag }}
-    secrets: inherit
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
     permissions:
       contents: read
       packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/build-image
+        with:
+          push_image: 'false'
+          image: ghcr.io/iisec-suzaki/overleaf-iisec
+          context: '.'
+          dockerfile: server-ce/Dockerfile
+          cache_scope: app
+          # ベースイメージ（private package）のプルに読み取りログインが要ります。
+          login: 'true'
+          build_args: OVERLEAF_BASE_TAG=ghcr.io/iisec-suzaki/overleaf-iisec-ja-base:${{ needs.base.outputs.ja_tag }}
+
+  translation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/build-image
+        with:
+          push_image: 'false'
+          image: ghcr.io/iisec-suzaki/overleaf-iisec-translation-service
+          context: ./translation-service
+          cache_scope: translation
+
+  git-bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/build-image
+        with:
+          push_image: 'false'
+          image: ghcr.io/iisec-suzaki/overleaf-iisec-git-bridge
+          context: ./services/git-bridge
+          dockerfile: services/git-bridge/Dockerfile.local
+          cache_scope: git-bridge
