@@ -1,0 +1,42 @@
+# main への push と手動実行（workflow_dispatch）で、Docker イメージをビルドして
+# GHCR に公開します。ビルド本体は images.yml（再利用ワークフロー）にあり、
+# PR 検証用（build-pr.yml）と共有しています。
+#
+# イメージ名・タグの一覧と手動実行手順は doc/ghcr-build.md を参照。
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ベースイメージの存在確認と、缺失時の再生成。通常は「既存を発見して即終了」の
+  # 軽量チェックだけで、アプリ変更ではベースは一切再ビルドされません。
+  base:
+    uses: ./.github/workflows/base.yml
+    with:
+      push_image: true
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: write
+
+  images:
+    needs: base
+    if: needs.base.outputs.base_missing != 'true'
+    uses: ./.github/workflows/images.yml
+    with:
+      push_image: true
+      ja_tag: ${{ needs.base.outputs.ja_tag }}
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: write

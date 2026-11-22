@@ -83,6 +83,13 @@ in which to run the Overleaf services. Baseimage uses the `runit` service
 manager to manage services, and init scripts from the `server-ce/runit`
 folder are added.
 
+### iisec: CI による GHCR 公開
+
+このリポジトリでは GitHub Actions で Docker イメージをビルドし、GHCR
+（`ghcr.io/iisec-suzaki/overleaf-iisec` ほか）へ公開します。イメージ名・タグの
+一覧、ベースイメージの再利用設計、手動実行手順は [doc/ghcr-build.md](doc/ghcr-build.md)
+を参照してください。
+
 ## Authors
 
 [The Overleaf Team](https://www.overleaf.com/about)\

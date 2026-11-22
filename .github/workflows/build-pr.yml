@@ -1,0 +1,39 @@
+# pull_request でビルド検証のみを行います。GHCR への push も書き込み権限も
+# 一切使いません（job 権限は packages: read。再利用ワークフロー側の write 宣言も
+# ここでの上限で read に制限されます）。ビルド本体は images.yml を共有。
+name: build-pr
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  base:
+    uses: ./.github/workflows/base.yml
+    with:
+      push_image: false
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: read
+
+  images:
+    needs: base
+    # ベースの Dockerfile を変えた PR では、未公開ベースに依存するアプリ画像の
+    # ビルドは行えません（base job にアノテーションが出ます。翻訳・git-bridge・
+    # ベース自体の検証は base job で実施済みです）。
+    if: needs.base.outputs.base_missing != 'true'
+    uses: ./.github/workflows/images.yml
+    with:
+      push_image: false
+      ja_tag: ${{ needs.base.outputs.ja_tag }}
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: read
