@@ -14,28 +14,24 @@ import MaterialIcon from '@/shared/components/material-icon'
 import type { MenuSectionStructure } from '@/features/ide-react/components/toolbar/command-dropdown'
 
 const sections: MenuSectionStructure[] = [
-  {
-    id: 'llm-insert-ai-generate',
-    children: [
-      {
-        id: 'ai-generate-group',
-        title: (
-          <span className="llm-menu-ai-title">
-            <MaterialIcon
-              type="smart_toy"
-              style={{ fontSize: 16, marginRight: 6 }}
-            />
-            AI Generate
-          </span>
-        ),
+    {
+        id: 'llm-insert-ai-generate',
         children: [
-          'llm_generate_title',
-          'llm_generate_abstract',
-          'llm_generate_keywords',
-        ],
-      },
-    ],
-  },
+            {
+                id: 'ai-generate-group',
+                title: (
+                    <span className="llm-menu-ai-title">
+                        <MaterialIcon
+                            type="smart_toy"
+                            style={{ fontSize: 16, marginRight: 6 }}
+                        />
+                        AI Generate
+                    </span>
+                ),
+                children: ['llm_generate_title', 'llm_generate_abstract', 'llm_generate_keywords']
+            }
+        ]
+    }
 ]
 
 export default sections

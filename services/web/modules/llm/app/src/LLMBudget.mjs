@@ -24,46 +24,38 @@
 import logger from '@overleaf/logger'
 import mongoose from '../../../../app/src/infrastructure/Mongoose.mjs'
 
-const RATE_PER_MINUTE = Math.max(
-  1,
-  Number.parseInt(process.env.LLM_USER_RATE_PER_MINUTE, 10) || 60
-)
+const RATE_PER_MINUTE = Math.max(1, Number.parseInt(process.env.LLM_USER_RATE_PER_MINUTE, 10) || 60)
 // Minimum sane daily floor: a few thousand tokens of chat must always fit.
-const DAILY_TOKENS = Math.max(
-  1000,
-  Number.parseInt(process.env.LLM_USER_DAILY_TOKENS, 10) || 1_000_000
-)
+const DAILY_TOKENS = Math.max(1000, Number.parseInt(process.env.LLM_USER_DAILY_TOKENS, 10) || 1_000_000)
 
 // overleaf-lab: ensure the shared collection + TTL index exist (idempotent).
 let ready = null
 function collection() {
-  if (!ready) {
-    ready = mongoose.connection.collection('llmUserBudget')
-  }
-  return ready
+    if (!ready) {
+        ready = mongoose.connection.collection('llmUserBudget')
+    }
+    return ready
 }
-let indexReady
+let indexReady = Promise.resolve()
 function ensureIndex() {
-  if (!indexReady) {
-    // 同時リクエストのupsertを同じ時間枠へ集約し、期限はDate型でTTLに渡します。
-    indexReady = Promise.all([
-      collection().createIndex({ userId: 1, minute: 1 }, { unique: true }),
-      collection().createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
-    ])
-    indexReady = indexReady.then(
-      () => undefined,
-      err => logger.warn({ err }, '[LLMBudget] TTL index (non-fatal)')
-    )
-  }
-  return indexReady
+    if (!indexReady) {
+        indexReady = mongoose.connection
+            .collection('llmUserBudget')
+            .createIndex({ userId: 1 }, { expireAfterSeconds: 86400 * 2, name: 'ttl' })
+        indexReady = indexReady.then(
+            () => undefined,
+            err => logger.warn({ err }, '[LLMBudget] TTL index (non-fatal)')
+        )
+    }
+    return indexReady
 }
 
 function minuteKey() {
-  // wall-clock minute bucket (UTC) — rolling minute, no carry-over
-  return new Date().toISOString().slice(0, 16)
+    // wall-clock minute bucket (UTC) — rolling minute, no carry-over
+    return new Date().toISOString().slice(0, 16)
 }
 function dayKey() {
-  return new Date().toISOString().slice(0, 10)
+    return new Date().toISOString().slice(0, 10)
 }
 
 /**
@@ -73,79 +65,60 @@ function dayKey() {
  * call with the model's reported output tokens.
  */
 export async function guardLLMCall(userId) {
-  if (!userId) {
-    return { record: () => {} }
-  }
-  await ensureIndex()
-  const minute = minuteKey()
-  const day = dayKey()
-  const coll = collection()
-  try {
-    const bumped = await coll.findOneAndUpdate(
-      { userId, minute },
-      {
-        $inc: { calls: 1 },
-        $set: { minute, day, expiresAt: new Date(Date.now() + 86400000 * 2) },
-      },
-      { upsert: true, returnDocument: 'after' }
-    )
-    if (bumped.calls > RATE_PER_MINUTE) {
-      throw Object.assign(
-        new Error(
-          `Rate limit reached (${RATE_PER_MINUTE} calls/minute). Wait a minute and try again.`
-        ),
-        { code: 'llm-rate-limited' }
-      )
+    if (!userId) {
+        return { record: () => {} }
     }
-  } catch (err) {
-    if (err && err.code) throw err
-    // counter store failure: fail OPEN (log; do not take the service down)
-    logger.warn(
-      { err, userId },
-      '[LLMBudget] rate check unavailable, continuing'
-    )
-  }
-
-  // Daily token budget (check against the CURRENT day's counter).
-  try {
-    // 分単位の呼出回数とは別に、一日分のトークンを一つの文書へ集計します。
-    const doc = await coll.findOne({ userId, minute: `day:${day}` })
-    const usedToday = doc && doc.day === day ? doc.tokens || 0 : 0
-    if (DAILY_TOKENS - usedToday <= 0) {
-      throw Object.assign(
-        new Error(
-          `Daily token budget reached (${DAILY_TOKENS} tokens/day). Resets at midnight UTC.`
-        ),
-        { code: 'llm-budget' }
-      )
+    void ensureIndex()
+    const minute = minuteKey()
+    const day = dayKey()
+    const coll = collection()
+    try {
+        const bumped = await coll.findOneAndUpdate(
+            { userId, minute },
+            { $inc: { calls: 1 }, $set: { minute, day } },
+            { upsert: true, returnDocument: 'after' }
+        )
+        if (bumped.calls > RATE_PER_MINUTE) {
+            throw Object.assign(
+                new Error(`Rate limit reached (${RATE_PER_MINUTE} calls/minute). Wait a minute and try again.`),
+                { code: 'llm-rate-limited' }
+            )
+        }
+    } catch (err) {
+        if (err && err.code) throw err
+        // counter store failure: fail OPEN (log; do not take the service down)
+        logger.warn({ err, userId }, '[LLMBudget] rate check unavailable, continuing')
     }
-  } catch (err) {
-    if (err && err.code) throw err
-    logger.warn(
-      { err, userId },
-      '[LLMBudget] daily check unavailable, continuing'
-    )
-  }
 
-  return {
-    record: outputTokens => {
-      const tokens = Number(outputTokens) || 0
-      if (tokens <= 0) return
-      const d = dayKey()
-      collection()
-        .findOneAndUpdate(
-          { userId, minute: `day:${d}` },
-          {
-            $inc: { tokens: tokens },
-            $set: { day: d, expiresAt: new Date(Date.now() + 86400000 * 2) },
-          },
-          { upsert: true }
-        )
-        .catch(err =>
-          logger.warn({ err }, '[LLMBudget] token record failed (non-fatal)')
-        )
-    },
-  }
+    // Daily token budget (check against the CURRENT day's counter).
+    try {
+        const doc = await coll.findOne({ userId })
+        const usedToday = doc && doc.day === day ? doc.tokens || 0 : 0
+        if (DAILY_TOKENS - usedToday <= 0) {
+            throw Object.assign(
+                new Error(`Daily token budget reached (${DAILY_TOKENS} tokens/day). Resets at midnight UTC.`),
+                { code: 'llm-budget' }
+            )
+        }
+    } catch (err) {
+        if (err && err.code) throw err
+        logger.warn({ err, userId }, '[LLMBudget] daily check unavailable, continuing')
+    }
+
+    return {
+        record: (outputTokens) => {
+            const tokens = Number(outputTokens) || 0
+            if (tokens <= 0) return
+            const d = dayKey()
+            collection()
+                .findOneAndUpdate(
+                    { userId, day: d },
+                    { $inc: { tokens: tokens }, $set: { day: d } },
+                    { upsert: true }
+                )
+                .catch(err => logger.warn({ err }, '[LLMBudget] token record failed (non-fatal)'))
+        },
+    }
 }
 
 export const LLM_BUDGET_INFO = { RATE_PER_MINUTE, DAILY_TOKENS }

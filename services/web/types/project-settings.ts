@@ -17,7 +17,13 @@ export type MainDocument = {
   path: string
 }
 
-export type ProjectCompiler = 'pdflatex' | 'latex' | 'xelatex' | 'lualatex'
+export type ProjectCompiler =
+  | 'pdflatex'
+  | 'latex'
+  | 'xelatex'
+  | 'lualatex'
+  | 'uplatex'
+  | 'platex'
 
 export type OverallThemeMeta = {
   name: string

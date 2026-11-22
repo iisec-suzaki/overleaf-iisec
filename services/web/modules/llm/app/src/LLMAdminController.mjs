@@ -1,7 +1,7 @@
 import logger from '@overleaf/logger'
 import fs from 'node:fs'
 import path from 'node:path'
-import { getUsageSummary } from './LLMUsage.mjs' // overleaf-lab (usage meter)
+import { getUsageSummary } from './LLMUsage.mjs'; // overleaf-lab (usage meter)
 import { z } from 'zod'
 import { expressify } from '@overleaf/promise-utils'
 import { encryptSecret, decryptSecret } from './LLMCrypto.mjs' // overleaf-lab: at-rest encryption of admin API key
@@ -15,8 +15,7 @@ import {
 } from './LLMPrompts.mjs' // overleaf-lab: editable prompt defaults + merge helper
 
 // Persist admin LLM settings in the same volume used by Overleaf data
-const ADMIN_SETTINGS_PATH =
-  process.env.LLM_ADMIN_SETTINGS_PATH ||
+const ADMIN_SETTINGS_PATH = process.env.LLM_ADMIN_SETTINGS_PATH ||
   '/var/lib/overleaf/data/llm-admin-settings.json'
 
 // overleaf-lab: fallback for the review answer budget when the admin has not set one.
@@ -34,10 +33,7 @@ function readAdminSettings() {
     return JSON.parse(raw)
   } catch (err) {
     if (err.code === 'ENOENT') return {}
-    logger.warn(
-      { err, path: ADMIN_SETTINGS_PATH },
-      '[LLM] Could not read admin settings file'
-    )
+    logger.warn({ err, path: ADMIN_SETTINGS_PATH }, '[LLM] Could not read admin settings file')
     return {}
   }
 }
@@ -49,14 +45,11 @@ function writeAdminSettings(data) {
     // rename is atomic) fixes torn reads; explicit chmod also corrects the
     // mode of an EXISTING file created with looser permissions.
     const tmp = `${ADMIN_SETTINGS_PATH}.tmp-${process.pid}-${Date.now()}`
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 })
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2))
     fs.chmodSync(tmp, 0o600)
     fs.renameSync(tmp, ADMIN_SETTINGS_PATH)
   } catch (err) {
-    logger.error(
-      { err, path: ADMIN_SETTINGS_PATH },
-      '[LLM] Could not write admin settings file'
-    )
+    logger.error({ err, path: ADMIN_SETTINGS_PATH }, '[LLM] Could not write admin settings file')
     throw err
   }
 }
@@ -67,8 +60,7 @@ function writeAdminSettings(data) {
 // here so the admin page and the model scan reflect an env-only configuration
 // instead of looking empty.
 function envModelList() {
-  const raw =
-    process.env.LLM_AVAILABLE_MODELS || process.env.LLM_MODEL_NAME || ''
+  const raw = process.env.LLM_AVAILABLE_MODELS || process.env.LLM_MODEL_NAME || ''
   return raw
     .split(',')
     .map(m => m.trim())
@@ -107,9 +99,7 @@ async function buildDisplaySettings() {
     hasApiKeyFromEnv: !settings.llmApiKey && !!process.env.LLM_API_KEY,
     allowedModelsFromEnv: !jsonHasModels && envModels.length > 0,
     // overleaf-lab: document compliance review settings
-    complianceRubrics: Array.isArray(settings.complianceRubrics)
-      ? settings.complianceRubrics
-      : [],
+    complianceRubrics: Array.isArray(settings.complianceRubrics) ? settings.complianceRubrics : [],
     reviewModel: settings.reviewModel || '',
     maxContextTokens: settings.maxContextTokens || 32000,
     reviewMaxTokens: settings.reviewMaxTokens || DEFAULT_REVIEW_MAX_TOKENS,
@@ -121,11 +111,9 @@ async function buildDisplaySettings() {
     // overleaf-lab: editable prompt overrides. Show the EFFECTIVE value (the
     // admin override when set, else the shipped default) plus the pristine
     // defaults so the admin page can offer a reset-to-default button.
-    askAiSystemPrompt:
-      settings.askAiSystemPrompt || DEFAULT_ASK_AI_SYSTEM_PROMPT,
+    askAiSystemPrompt: settings.askAiSystemPrompt || DEFAULT_ASK_AI_SYSTEM_PROMPT,
     errorPrompt: settings.errorPrompt || DEFAULT_ERROR_PROMPT,
-    reviewSystemPrompt:
-      settings.reviewSystemPrompt || DEFAULT_REVIEW_SYSTEM_PROMPT,
+    reviewSystemPrompt: settings.reviewSystemPrompt || DEFAULT_REVIEW_SYSTEM_PROMPT,
     askAiActionPrompts: mergeActionPrompts(settings.askAiActionPrompts),
     promptDefaults: {
       askAiSystemPrompt: DEFAULT_ASK_AI_SYSTEM_PROMPT,
@@ -137,10 +125,7 @@ async function buildDisplaySettings() {
 }
 
 async function adminSettingsPage(req, res) {
-  const pugPath = new URL(
-    '../../app/views/llm-admin-settings.pug',
-    import.meta.url
-  ).pathname
+  const pugPath = new URL('../../app/views/llm-admin-settings.pug', import.meta.url).pathname
   res.render(pugPath, await buildDisplaySettings())
 }
 
@@ -183,7 +168,9 @@ const llmSettingsSchema = z.object({
   reviewSystemPrompt: z.string().max(8000).optional(),
 
   // overleaf-lab: action prompts, when provided, must be a plain (non-array) object.
-  askAiActionPrompts: z.record(z.string(), z.string()).optional(),
+  askAiActionPrompts: z
+    .record(z.string(), z.string())
+    .optional(),
 })
 
 async function saveAdminSettings(req, res) {
@@ -193,7 +180,7 @@ async function saveAdminSettings(req, res) {
       field: issue.path.join('.'),
       message: issue.message,
     }))
-    logger.error({ errors }, 'Bad admin settings')
+    logger.error( { errors }, 'Bad admin settings')
     // F8: return ALL validation errors so the UI can surface them.
     return res.status(400).json({
       ok: false,
@@ -233,18 +220,13 @@ async function saveAdminSettings(req, res) {
   const sanitizedRubricsInput = sanitizeComplianceRubrics(complianceRubrics)
   // overleaf-lab: validate the RAW input so an over-long scan-patterns block
   // fails loudly (the sanitizer would otherwise silently truncate it).
-  const rubricError = validateComplianceRubrics(
-    Array.isArray(complianceRubrics) ? complianceRubrics : []
-  )
+  const rubricError = validateComplianceRubrics(Array.isArray(complianceRubrics) ? complianceRubrics : [])
   if (rubricError) {
     return res.status(400).json({ error: rubricError })
   }
-  const sanitizedRubrics =
-    sanitizedRubricsInput === null
-      ? Array.isArray(existing.complianceRubrics)
-        ? existing.complianceRubrics
-        : []
-      : sanitizedRubricsInput
+  const sanitizedRubrics = sanitizedRubricsInput === null
+    ? (Array.isArray(existing.complianceRubrics) ? existing.complianceRubrics : [])
+    : sanitizedRubricsInput
 
   // overleaf-lab: clamp the context window to a sane range; keep existing (or the
   // 32000 default) when not provided.
@@ -268,8 +250,7 @@ async function saveAdminSettings(req, res) {
       ? existing.reviewMaxTokens || DEFAULT_REVIEW_MAX_TOKENS
       : Math.min(128000, Math.max(500, parsed))
   } else {
-    sanitizedReviewMaxTokens =
-      existing.reviewMaxTokens || DEFAULT_REVIEW_MAX_TOKENS
+    sanitizedReviewMaxTokens = existing.reviewMaxTokens || DEFAULT_REVIEW_MAX_TOKENS
   }
 
   // overleaf-lab: scan-pattern validation moved to the shared helper above
@@ -298,17 +279,10 @@ async function saveAdminSettings(req, res) {
 
   const updatedSettings = {
     ...existing,
-    systemPrompt:
-      typeof systemPrompt === 'string'
-        ? systemPrompt
-        : existing.systemPrompt || '',
-    llmApiUrl:
-      typeof llmApiUrl === 'string' ? llmApiUrl : existing.llmApiUrl || '',
-    llmApiType:
-      typeof llmApiType === 'string' ? llmApiType : existing.llmApiType || '',
-    allowedModels: Array.isArray(allowedModels)
-      ? allowedModels
-      : existing.allowedModels || [],
+    systemPrompt: typeof systemPrompt === 'string' ? systemPrompt : (existing.systemPrompt || ''),
+    llmApiUrl: typeof llmApiUrl === 'string' ? llmApiUrl : (existing.llmApiUrl || ''),
+    llmApiType: typeof llmApiType === 'string' ? llmApiType : (existing.llmApiType || ''),
+    allowedModels: Array.isArray(allowedModels) ? allowedModels : existing.allowedModels || [],
     knownModels: Array.isArray(knownModels)
       ? knownModels
       : Array.isArray(existing.knownModels)
@@ -316,44 +290,20 @@ async function saveAdminSettings(req, res) {
         : Array.isArray(existing.allowedModels)
           ? existing.allowedModels
           : [],
-    completionModel:
-      typeof completionModel === 'string'
-        ? completionModel
-        : existing.completionModel || '',
+    completionModel: typeof completionModel === 'string' ? completionModel : (existing.completionModel || ''),
     complianceRubrics: sanitizedRubrics,
-    reviewModel:
-      typeof reviewModel === 'string'
-        ? reviewModel
-        : existing.reviewModel || '',
+    reviewModel: typeof reviewModel === 'string' ? reviewModel : (existing.reviewModel || ''),
     maxContextTokens: sanitizedMaxContextTokens,
     reviewMaxTokens: sanitizedReviewMaxTokens,
     // overleaf-lab: omitted flag keeps the existing value (default true).
-    chatEnabled:
-      typeof chatEnabled === 'boolean'
-        ? chatEnabled
-        : existing.chatEnabled !== false,
-    completionEnabled:
-      typeof completionEnabled === 'boolean'
-        ? completionEnabled
-        : existing.completionEnabled !== false,
-    reviewEnabled:
-      typeof reviewEnabled === 'boolean'
-        ? reviewEnabled
-        : existing.reviewEnabled !== false,
+    chatEnabled: typeof chatEnabled === 'boolean' ? chatEnabled : (existing.chatEnabled !== false),
+    completionEnabled: typeof completionEnabled === 'boolean' ? completionEnabled : (existing.completionEnabled !== false),
+    reviewEnabled: typeof reviewEnabled === 'boolean' ? reviewEnabled : (existing.reviewEnabled !== false),
     // overleaf-lab: editable prompt overrides. An empty string is stored as-is
     // and later falls back to the default via `|| DEFAULT`.
-    askAiSystemPrompt:
-      typeof askAiSystemPrompt === 'string'
-        ? askAiSystemPrompt
-        : existing.askAiSystemPrompt || '',
-    errorPrompt:
-      typeof errorPrompt === 'string'
-        ? errorPrompt
-        : existing.errorPrompt || '',
-    reviewSystemPrompt:
-      typeof reviewSystemPrompt === 'string'
-        ? reviewSystemPrompt
-        : existing.reviewSystemPrompt || '',
+    askAiSystemPrompt: typeof askAiSystemPrompt === 'string' ? askAiSystemPrompt : (existing.askAiSystemPrompt || ''),
+    errorPrompt: typeof errorPrompt === 'string' ? errorPrompt : (existing.errorPrompt || ''),
+    reviewSystemPrompt: typeof reviewSystemPrompt === 'string' ? reviewSystemPrompt : (existing.reviewSystemPrompt || ''),
     askAiActionPrompts: sanitizedActionPrompts,
   }
 
@@ -364,17 +314,14 @@ async function saveAdminSettings(req, res) {
   }
 
   await writeAdminSettings(updatedSettings)
-  logger.info(
-    {
-      length: systemPrompt.length,
-      llmApiUrl: !!updatedSettings.llmApiUrl,
-      llmApiType: !!updatedSettings.llmApiType,
-      hasLlmApiKey: !!updatedSettings.llmApiKey,
-      allowedModels: updatedSettings.allowedModels?.length || 0,
-      knownModels: updatedSettings.knownModels?.length || 0,
-    },
-    '[LLM] Admin settings updated'
-  )
+  logger.info({
+    length: systemPrompt.length,
+    llmApiUrl: !!updatedSettings.llmApiUrl,
+    llmApiType: !!updatedSettings.llmApiType,
+    hasLlmApiKey: !!updatedSettings.llmApiKey,
+    allowedModels: updatedSettings.allowedModels?.length || 0,
+    knownModels: updatedSettings.knownModels?.length || 0,
+  }, '[LLM] Admin settings updated')
 
   res.json({ success: true })
 }
@@ -390,7 +337,7 @@ export async function getAdminLLMSettings() {
   // overleaf-lab: fall back to env so the model scan / connection-check and the
   // chat share the same effective config (mirrors buildDisplaySettings above).
   const jsonHasModels =
-    Array.isArray(settings.allowedModels) && settings.allowedModels.length > 0
+      Array.isArray(settings.allowedModels) && settings.allowedModels.length > 0
   // overleaf-lab: the stored admin key is encrypted at rest; decrypt before use.
   // decryptSecret returns legacy plaintext (no enc:v1: prefix) unchanged.
   const jsonKey = settings.llmApiKey ? decryptSecret(settings.llmApiKey) : ''
@@ -431,9 +378,7 @@ export async function getLLMFeatureFlags() {
 // rubrics (readAdminSettings already handles the missing-file case).
 export async function getComplianceRubrics() {
   const settings = readAdminSettings()
-  return Array.isArray(settings.complianceRubrics)
-    ? settings.complianceRubrics
-    : []
+  return Array.isArray(settings.complianceRubrics) ? settings.complianceRubrics : []
 }
 
 // overleaf-lab (2026-08-27): shared rubric hygiene, used by BOTH the admin save
@@ -464,8 +409,7 @@ export function sanitizeComplianceRubrics(list) {
 export function validateComplianceRubrics(list) {
   if (!Array.isArray(list)) return null
   for (const r of list) {
-    const patternsText =
-      r && typeof r.scanPatterns === 'string' ? r.scanPatterns : ''
+    const patternsText = r && typeof r.scanPatterns === 'string' ? r.scanPatterns : ''
     if (patternsText.length > 4000) {
       return `Scan patterns of rubric "${(r && r.name) || '?'}" must be 4000 characters or fewer`
     }
@@ -510,8 +454,7 @@ async function checkAdminLLMConnection(req, res) {
   const adminSettings = await getAdminLLMSettings()
   const llmApiUrl = apiUrl || adminSettings.llmApiUrl
   const llmApiKey = apiKey || adminSettings.llmApiKey
-  const llmApiType =
-    apiType || adminSettings.llmApiType || detectProviderType(llmApiUrl)
+  const llmApiType = apiType || adminSettings.llmApiType || detectProviderType(llmApiUrl)
 
   const testModel =
     adminSettings.allowedModels[0] ||
@@ -528,21 +471,13 @@ async function checkAdminLLMConnection(req, res) {
   // successful model-list fetch: it proves reachability, auth, and that the
   // backend serves at least one model, in ONE round trip. The first configured
   // model (if any) must be in the list, which catches typos/stopped models.
-  const spec = normalizeSpecFor(
-    llmApiUrl,
-    llmApiKey,
-    llmApiType,
-    testModel || 'probe'
-  )
+  const spec = normalizeSpecFor(llmApiUrl, llmApiKey, llmApiType, testModel || 'probe')
 
   try {
     const { ids } = await listModels(spec, { timeoutMs: 60000 })
 
     if (testModel && !ids.includes(testModel)) {
-      logger.warn(
-        { testModel, ids: ids.length },
-        '[LLM] Admin check: configured model not in backend list'
-      )
+      logger.warn({ testModel, ids: ids.length }, '[LLM] Admin check: configured model not in backend list')
       return res.status(404).json({
         success: false,
         error: `Model "${testModel}" is not available on this backend`,
@@ -553,11 +488,8 @@ async function checkAdminLLMConnection(req, res) {
 
     res.json({ success: true, message: 'Connection successful', models: ids })
   } catch (err) {
-    const status = err.code === 'auth' ? 401 : err.status || 500
-    logger.error(
-      { err: err.message, code: err.code },
-      '[LLM] Admin connection check failed'
-    )
+    const status = err.code === 'auth' ? 401 : (err.status || 500)
+    logger.error({ err: err.message, code: err.code }, '[LLM] Admin connection check failed')
     res.status(status).json({
       success: false,
       error: 'LLM connection failed',
@@ -572,12 +504,7 @@ function normalizeSpecFor(baseUrl, apiKey, providerType, model) {
   const type = providerType || detectProviderType(baseUrl)
   const base = String(baseUrl || '').replace(/\/+$/, '')
   const baseForType = type === 'anthropic' ? base.replace(/\/v\d+$/, '') : base
-  return {
-    providerType: type,
-    baseUrl: baseForType,
-    apiKey: apiKey || '',
-    model,
-  }
+  return { providerType: type, baseUrl: baseForType, apiKey: apiKey || '', model }
 }
 
 async function scanAdminModels(req, res) {
@@ -587,8 +514,7 @@ async function scanAdminModels(req, res) {
   const adminSettings = await getAdminLLMSettings()
   const llmApiUrl = apiUrl || adminSettings.llmApiUrl
   const llmApiKey = apiKey || adminSettings.llmApiKey
-  const llmApiType =
-    apiType || adminSettings.llmApiType || detectProviderType(llmApiUrl)
+  const llmApiType = apiType || adminSettings.llmApiType || detectProviderType(llmApiUrl)
 
   if (!llmApiUrl) {
     return res.status(400).json({
@@ -598,17 +524,11 @@ async function scanAdminModels(req, res) {
   }
 
   try {
-    const { ids } = await listModels(
-      normalizeSpecFor(llmApiUrl, llmApiKey, llmApiType, 'scan'),
-      { timeoutMs: 60000 }
-    )
+    const { ids } = await listModels(normalizeSpecFor(llmApiUrl, llmApiKey, llmApiType, 'scan'), { timeoutMs: 60000 })
     res.json({ success: true, models: ids })
   } catch (error) {
-    const status = error.code === 'auth' ? 401 : error.status || 500
-    logger.error(
-      { error: error.message, code: error.code },
-      '[LLM] Admin model scan failed'
-    )
+    const status = error.code === 'auth' ? 401 : (error.status || 500)
+    logger.error({ error: error.message, code: error.code }, '[LLM] Admin model scan failed')
     res.status(status).json({
       success: false,
       error: 'Model scan failed',
@@ -618,16 +538,15 @@ async function scanAdminModels(req, res) {
   }
 }
 
+
 // overleaf-lab (usage meter): whole-site token accounting for the admin page.
 async function usageSummary(req, res) {
   const days = parseInt(req.query.days, 10)
-  const summary = await getUsageSummary({
-    userId: null,
-    days: Number.isFinite(days) ? days : 30,
-  })
+  const summary = await getUsageSummary({ userId: null, days: Number.isFinite(days) ? days : 30 })
   if (summary) {
     res.json({ ok: true, ...summary })
-  } else {
+  }
+  else {
     // the meter is non-fatal for the whole module — a missing store is a muted
     // "unavailable" on the UI, never a 500.
     res.json({ ok: false, error: 'unavailable' })
@@ -638,6 +557,6 @@ export default {
   getAdminSettings: expressify(getAdminSettings),
   saveAdminSettings: expressify(saveAdminSettings),
   checkAdminLLMConnection: expressify(checkAdminLLMConnection),
-  scanAdminModels: expressify(scanAdminModels),
-  usageSummary: expressify(usageSummary),
+  scanAdminModels: expressify(scanAdminModels),  usageSummary: expressify(usageSummary),
+
 }

@@ -11,13 +11,13 @@
 const USER_REF = /^u:([0-9a-f]{8}):(.+)$/
 
 export function parseModelRef(modelString) {
-  const match = USER_REF.exec(String(modelString || ''))
-  if (match) return { kind: 'user', rowId: match[1], model: match[2] }
-  return { kind: 'site', model: String(modelString || '') }
+    const match = USER_REF.exec(String(modelString || ''))
+    if (match) return { kind: 'user', rowId: match[1], model: match[2] }
+    return { kind: 'site', model: String(modelString || '') }
 }
 
 export function makeUserModelRef(rowId, model) {
-  return `u:${rowId}:${model}`
+    return `u:${rowId}:${model}`
 }
 
 export default { parseModelRef, makeUserModelRef }

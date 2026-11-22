@@ -13,10 +13,6 @@ import {
 import usePersistedState from '../hooks/use-persisted-state'
 import useAbortController from '../hooks/use-abort-controller'
 import useEventListener from '../hooks/use-event-listener'
-import {
-  compileResultKey,
-  DocumentCompileCache,
-} from '../../features/pdf-preview/util/document-compile-cache'
 import DocumentCompiler from '../../features/pdf-preview/util/compiler'
 import {
   send,
@@ -68,6 +64,22 @@ import {
 import useIsNetworkStalled from '@/features/ide-react/hooks/use-is-network-stalled'
 
 type PdfFile = Record<string, any>
+
+// メイン文書ごとのコンパイル結果を編集セッション内で保持する個数の上限（LRU）。
+const MAX_CACHED_COMPILE_RESULTS = 4
+
+/**
+ * コンパイル結果キャッシュのキーを作る。ID（rootDocId）が最優先で、
+ * 未保存文書などはパス（rootResourcePath）で補う。どちらも無ければ null。
+ */
+function getCompileResultCacheKey(
+  rootDocId: string | null | undefined,
+  rootResourcePath: string | undefined
+): string | null {
+  if (rootDocId) return `doc:${rootDocId}`
+  if (rootResourcePath) return `path:${rootResourcePath}`
+  return null
+}
 
 export type CompileContext = {
   autoCompile: boolean
@@ -162,6 +174,14 @@ export const LocalCompileProvider: FC<React.PropsWithChildren> = ({
   const { fileTreeData } = useFileTreeData()
   const { findEntityByPath } = useFileTreePathContext()
   const getRootDocInfo = useRootDoc()
+  const activeRootDocInfo = getRootDocInfo()
+  const activeRootDocCacheKey = getCompileResultCacheKey(
+    activeRootDocInfo.rootDocId,
+    activeRootDocInfo.rootResourcePath
+  )
+  const activeCompileResultCacheKey = activeRootDocCacheKey
+    ? `${projectId}:${activeRootDocCacheKey}`
+    : null
   const isNetworkStalled = useIsNetworkStalled()
 
   // whether a compile is in progress
@@ -203,78 +223,31 @@ export const LocalCompileProvider: FC<React.PropsWithChildren> = ({
   const [clsiServerId, setClsiServerId] = useState<string>()
 
   // data received in response to a compile request
-  const [receivedData, setReceivedData] = useState<CompileResponseData>()
-  const receivedDataRef = useRef<CompileResponseData>()
-  const [compileCache] = useState(() => new DocumentCompileCache())
-  const [changedAt, updateChangedAt] = useState(0)
-  const changedAtRef = useRef(0)
-  const setChangedAt = useCallback<Dispatch<SetStateAction<number>>>(
-    (value) => {
-      const next =
-        typeof value === 'function' ? value(changedAtRef.current) : value
-      changedAtRef.current = next
-      if (next > 0) compileCache.invalidate()
-      updateChangedAt(next)
-    },
-    [compileCache]
+  const [data, setData] = useState<CompileResponseData>()
+  // メイン文書ごとの成功済みコンパイル結果（data と stale フラグ）のセッション内キャッシュ。
+  const compileResultsByRootDocRef = useRef(
+    new Map<string, { data: CompileResponseData; stale: boolean }>()
   )
+  const [activeCompileResultStale, setActiveCompileResultStale] =
+    useState(false)
+  // the timestamp that a doc was last changed
+  const [changedAt, setChangedAt] = useState(0)
+
+  // 編集中の文書が変わったら、キャッシュ済みの結果をすべて「古い」扱いにします。
+  // 表示中の PDF があれば、その表示にも stale を反映します。
   const handleDocumentChanged = useCallback(() => {
     setChangedAt(Date.now())
-  }, [setChangedAt])
+    for (const [key, result] of compileResultsByRootDocRef.current) {
+      compileResultsByRootDocRef.current.set(key, { ...result, stale: true })
+    }
+    if (
+      data?.status === 'success' &&
+      data.outputFiles?.some(file => file.path === 'output.pdf')
+    ) {
+      setActiveCompileResultStale(true)
+    }
+  }, [data, setChangedAt])
   useEventListener('doc:changed', handleDocumentChanged)
-
-  // 文書内容の判定は高コストなので、文書・設定・編集状態が変わったときだけ行う。
-  const activeRoot = useMemo(
-    () => getRootDocInfo(),
-    [getRootDocInfo, changedAt]
-  )
-  const activeResultKey = compileResultKey(
-    projectId,
-    activeRoot.rootDocId,
-    activeRoot.rootResourcePath
-  )
-  const setData = useCallback<
-    Dispatch<SetStateAction<CompileResponseData | undefined>>
-  >(
-    (value) => {
-      // DocumentCompiler は具体値を渡す。関数形式も React の setter として維持する。
-      const next =
-        typeof value === 'function' ? value(receivedDataRef.current) : value
-      receivedDataRef.current = next
-      if (next) compileCache.put(projectId, next, changedAtRef.current > 0)
-      setReceivedData(next)
-    },
-    [compileCache, projectId]
-  )
-  const receivedResultKey = receivedData
-    ? compileResultKey(
-        projectId,
-        receivedData.rootDocId,
-        receivedData.options?.rootResourcePath
-      )
-    : null
-  // 旧文書のコンパイルが切り替え後に完了しても、その PDF を現文書へ表示しない。
-  // data が空でもキャッシュを引くことで、未コンパイル文書を経由した復元にも対応する。
-  const cachedResult = compileCache.peek(activeResultKey)
-  const data =
-    activeResultKey && receivedResultKey === activeResultKey
-      ? receivedData
-      : cachedResult?.data
-  const compileResultNeedsRefresh =
-    changedAt > 0 || Boolean(cachedResult?.stale) || !data
-
-  const hasResult = Boolean(data)
-  useEffect(() => {
-    // 直前の失敗応答を文書の再表示まで引き継がず、最後の成功結果に戻す。
-    // setData を通すと古い結果を新しい成功として再登録してしまうので、表示だけを戻す。
-    const restored = compileCache.peek(activeResultKey)?.data
-    receivedDataRef.current = restored
-    setReceivedData(restored)
-  }, [compileCache, activeResultKey])
-
-  useEffect(() => {
-    compileCache.touch(activeResultKey)
-  }, [compileCache, activeResultKey, data])
 
   // the rootDocId used in the most recent compile request, which may not be the
   // same as the project rootDocId. This is used to calculate correct paths when
@@ -314,7 +287,7 @@ export const LocalCompileProvider: FC<React.PropsWithChildren> = ({
     useState(false)
 
   const toggleLogs = useCallback(() => {
-    setShowLogs((prev) => {
+    setShowLogs(prev => {
       if (!prev) {
         sendMBOnce('ide-open-logs-once')
       }
@@ -336,6 +309,78 @@ export const LocalCompileProvider: FC<React.PropsWithChildren> = ({
 
   // areas to highlight on the PDF, from synctex
   const [highlights, setHighlights] = useState()
+
+  // メイン文書ごとの最新成功 PDF を保持し、メインタブの切り替え時に再コンパイルなしで
+  // 以前の PDF を復元できるようにします（上限を超えた分は古いものから捨てます）。
+  useEffect(() => {
+    if (
+      !data ||
+      data.status !== 'success' ||
+      !data.outputFiles?.some(file => file.path === 'output.pdf')
+    ) {
+      return
+    }
+    const rootDocKey = getCompileResultCacheKey(
+      data.rootDocId,
+      data.options?.rootResourcePath
+    )
+    if (!rootDocKey) return
+    const key = `${projectId}:${rootDocKey}`
+
+    const cachedResults = compileResultsByRootDocRef.current
+    const cachedResult = cachedResults.get(key)
+    if (cachedResult?.data !== data) {
+      cachedResults.delete(key)
+      cachedResults.set(key, { data, stale: changedAt > 0 })
+      if (key === activeCompileResultCacheKey) {
+        setActiveCompileResultStale(changedAt > 0)
+      }
+    }
+    if (cachedResults.size > MAX_CACHED_COMPILE_RESULTS) {
+      const oldestKey = cachedResults.keys().next().value
+      if (oldestKey) cachedResults.delete(oldestKey)
+    }
+  }, [activeCompileResultCacheKey, changedAt, data, projectId])
+
+  // 表示中のメイン文書が切り替わったとき、キャッシュがあればその PDF・ログを
+  // 復元し、未コンパイルの文書なら別文書の PDF が残らないよう表示を空にします。
+  useEffect(() => {
+    if (!joinedOnce || !activeCompileResultCacheKey || !data) return
+    const currentDataRootDocKey = getCompileResultCacheKey(
+      data.rootDocId,
+      data.options?.rootResourcePath
+    )
+    if (`${projectId}:${currentDataRootDocKey}` === activeCompileResultCacheKey) {
+      return
+    }
+
+    const cachedResult = compileResultsByRootDocRef.current.get(
+      activeCompileResultCacheKey
+    )
+    if (cachedResult) {
+      const cachedResults = compileResultsByRootDocRef.current
+      cachedResults.delete(activeCompileResultCacheKey)
+      cachedResults.set(activeCompileResultCacheKey, cachedResult)
+      setActiveCompileResultStale(cachedResult.stale)
+      setData(cachedResult.data)
+      return
+    }
+
+    // この文書がまだセッション内でコンパイルされていない場合、他言語版の PDF を
+    // 表示し続けないよう、明示的に表示をリセットします。
+    setActiveCompileResultStale(false)
+    setData(undefined)
+    setPdfFile(undefined)
+    setFileList(undefined)
+    setRawLog(undefined)
+    setLogEntries(undefined)
+    setLogEntryAnnotations(undefined)
+    setValidationIssues(undefined)
+    setHighlights(undefined)
+    setError(undefined)
+    setShowLogs(false)
+    setStoppedOnFirstError(false)
+  }, [activeCompileResultCacheKey, data, joinedOnce, projectId])
 
   const [position, setPosition] = usePdfScrollPosition(lastCompileRootDocId)
 
@@ -574,21 +619,6 @@ export const LocalCompileProvider: FC<React.PropsWithChildren> = ({
     recordedActionsRef.current[action] = true
   }, [])
 
-  // 文書切り替え時には、PDF だけでなくログ・注釈・エラーも一緒にリセットする。
-  // 復元先に成功結果がある場合は、この後の既存処理でその結果を表示する。
-  useEffect(() => {
-    setPdfFile(undefined)
-    setFileList(undefined)
-    setRawLog(undefined)
-    setLogEntries(undefined)
-    setLogEntryAnnotations(undefined)
-    setValidationIssues(undefined)
-    setHighlights(undefined)
-    setError(undefined)
-    setShowLogs(false)
-    setStoppedOnFirstError(false)
-  }, [activeResultKey, hasResult])
-
   // handle the data returned from a compile request
   // note: this should _only_ run when `data` changes,
   // the other dependencies must all be static
@@ -627,8 +657,6 @@ export const LocalCompileProvider: FC<React.PropsWithChildren> = ({
 
         handleLogFiles(outputFiles, data, abortController.signal).then(
           (result: Record<string, any>) => {
-            // 中断直前にログの解析が完了した場合も、旧文書の内容を反映しない。
-            if (abortController.signal.aborted) return
             setRawLog(result.log)
             setLogEntries(result.logEntries)
             setLogEntryAnnotations(
@@ -781,6 +809,7 @@ export const LocalCompileProvider: FC<React.PropsWithChildren> = ({
   )
 
   // show that the project has pending changes
+  const compileResultNeedsRefresh = uncompiled || activeCompileResultStale
   const hasChanges = Boolean(
     canAutoCompile && compileResultNeedsRefresh && compiledOnce
   )
@@ -820,19 +849,19 @@ export const LocalCompileProvider: FC<React.PropsWithChildren> = ({
   // clear the compile cache
   const clearCache = useCallback(() => {
     setClearingCache(true)
-    compileCache.clear()
-    setData(undefined)
+    compileResultsByRootDocRef.current.clear()
 
     return compiler
       .clearCache()
       .then(() => {
         setFileList(undefined)
         setPdfFile(undefined)
+        setActiveCompileResultStale(false)
       })
       .finally(() => {
         setClearingCache(false)
       })
-  }, [compiler, compileCache, setData])
+  }, [compiler])
 
   const syncToEntry = useCallback(
     (entry: any, keepCurrentView = false) => {
@@ -872,8 +901,7 @@ export const LocalCompileProvider: FC<React.PropsWithChildren> = ({
       deliveryLatencies,
       draft,
       png2pdf,
-      editedSinceCompileStarted:
-        editedSinceCompileStarted || compileResultNeedsRefresh,
+      editedSinceCompileStarted,
       error,
       fileList,
       hasChanges,
@@ -910,7 +938,7 @@ export const LocalCompileProvider: FC<React.PropsWithChildren> = ({
       stopOnFirstError,
       stopOnValidationError,
       stoppedOnFirstError,
-      uncompiled: uncompiled || compileResultNeedsRefresh,
+      uncompiled: compileResultNeedsRefresh,
       validationIssues,
       firstRenderDone,
       setChangedAt,
@@ -965,7 +993,6 @@ export const LocalCompileProvider: FC<React.PropsWithChildren> = ({
       stopOnFirstError,
       stopOnValidationError,
       stoppedOnFirstError,
-      uncompiled,
       compileResultNeedsRefresh,
       validationIssues,
       firstRenderDone,

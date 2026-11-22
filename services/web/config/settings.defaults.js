@@ -75,7 +75,8 @@ const httpPermissionsPolicy = {
   },
 }
 
-const safeCompilers = ['xelatex', 'pdflatex', 'latex', 'lualatex']
+// 日本語組版エンジン platex/uplatex を追加（iisec。TeX Live 同梱バイナリ使用）
+const safeCompilers = ['xelatex', 'pdflatex', 'latex', 'lualatex', 'uplatex', 'platex']
 
 module.exports = {
   env: 'server-ce',
@@ -180,18 +181,16 @@ module.exports = {
   // options incase you want to run some services on remote hosts.
   apis: {
     web: {
-      url: `http://${
-        process.env.WEB_API_HOST || process.env.WEB_HOST || '127.0.0.1'
-      }:${process.env.WEB_API_PORT || process.env.WEB_PORT || 3000}`,
+      url: `http://${process.env.WEB_API_HOST || process.env.WEB_HOST || '127.0.0.1'
+        }:${process.env.WEB_API_PORT || process.env.WEB_PORT || 3000}`,
       user: httpAuthUser,
       pass: httpAuthPass,
     },
     documentupdater: {
-      url: `http://${
-        process.env.DOCUPDATER_HOST ||
+      url: `http://${process.env.DOCUPDATER_HOST ||
         process.env.DOCUMENT_UPDATER_HOST ||
         '127.0.0.1'
-      }:3003`,
+        }:3003`,
     },
     geoIpLookup: {
       cacheSize: intFromEnv('GEO_IP_LOOKUP_CACHE_SIZE', 10_000),
@@ -259,8 +258,7 @@ module.exports = {
     v1_history: {
       url:
         process.env.V1_HISTORY_URL ||
-        `http://${process.env.V1_HISTORY_HOST || '127.0.0.1'}:${
-          process.env.V1_HISTORY_PORT || '3100'
+        `http://${process.env.V1_HISTORY_HOST || '127.0.0.1'}:${process.env.V1_HISTORY_PORT || '3100'
         }/api`,
       urlForGitBridge: process.env.V1_HISTORY_URL_FOR_GIT_BRIDGE,
       user: process.env.V1_HISTORY_USER || 'staging',
@@ -822,7 +820,7 @@ module.exports = {
       .filter(x => x !== ''),
     trustedUsersRegex: process.env.CAPTCHA_TRUSTED_USERS_REGEX
       ? // Enforce matching of the entire input.
-        new RegExp(`^${process.env.CAPTCHA_TRUSTED_USERS_REGEX}$`)
+      new RegExp(`^${process.env.CAPTCHA_TRUSTED_USERS_REGEX}$`)
       : null,
     disabled: {
       invite: true,
@@ -1035,19 +1033,19 @@ module.exports = {
     sourceEditorExtensions: [
       Path.resolve(
         __dirname,
-        '../modules/llm/frontend/js/extensions/llm-inline-completion'
+        '../modules/bib-editor/frontend/js/extensions/bib-editor-extension.ts'
       ),
+      // llm モジュール由来: インライン補完（Tab 補完）のエディタ拡張。
       Path.resolve(
         __dirname,
-        '../modules/bib-editor/frontend/js/extensions/bib-editor-extension.ts'
+        '../modules/llm/frontend/js/extensions/llm-inline-completion'
       ),
     ],
     sourceEditorVisualExtensions: [],
-    // 本文の参照・差分プレビュー・適用を、現在のメイン文書へ結び付けます。
     sourceEditorComponents: [
       Path.resolve(
         __dirname,
-        '../modules/llm/frontend/js/components/llm-source-editor-component.tsx'
+        '../modules/llm/frontend/js/components/llm-source-editor-component'
       ),
     ],
     pdfLogEntryHeaderActionComponents: [
@@ -1073,16 +1071,23 @@ module.exports = {
       ),
     ],
     sourceEditorToolbarStartButtons: [
-      Path.resolve(
-        __dirname,
-        '../modules/llm/frontend/js/extensions/llm-editor-toolbar-ask-ai'
-      ),
+        // overleaf-lab (2026-08, reference-synced): the editor toolbar "Ask AI"
+        // (smart_toy) button — opens the LLM context menu.
+        Path.resolve(
+            __dirname,
+            '../modules/llm/frontend/js/extensions/llm-editor-toolbar-ask-ai'
+        ),
+        // 横並び表示: 現在のファイルを右パネルのタブへ移すボタン。
+        Path.resolve(
+            __dirname,
+            '../modules/local-llm-translation/frontend/js/split/split-toolbar-button'
+        ),
     ],
     sourceEditorToolbarButtonGroups: [],
-    // メインエディターの状態を翻訳レールへ中継し、横並び表示の入口を登録します。
+    // ローカル LLM 翻訳モジュール由来のツールバー部品（エディタの「英訳」ボタン）。
     sourceEditorToolbarComponents: [
-      '../../../../../modules/local-llm-translation/frontend/js/rail/CodeMirrorBridge',
-      '../../../../../modules/local-llm-translation/frontend/js/split/BilingualEditorButton',
+      // ツールバーには何も表示しないブリッジ（CodeMirror を左レールへ中継）。
+      '../../../../../modules/local-llm-translation/frontend/js/CodeMirrorBridge',
     ],
     sourceEditorToolbarEndButtons: [],
     rootContextProviders: [
@@ -1102,9 +1107,10 @@ module.exports = {
       ),
     ],
     mainEditorLayoutPanels: [
+      // 日本語/英語 .tex の横並び表示パネル（エディターの右に第 3 列）。
       Path.resolve(
         __dirname,
-        '../modules/local-llm-translation/frontend/js/split/BilingualEditorPanel.tsx'
+        '../modules/local-llm-translation/frontend/js/split/SplitFilePanel.tsx'
       ),
     ],
     pythonRunner: [
@@ -1144,30 +1150,43 @@ module.exports = {
     menubarExtraComponents: [
       Path.resolve(
         __dirname,
-        '../modules/llm/frontend/js/extensions/llm-file-menu-commands'
+        '../modules/template-gallery/frontend/js/features/template/components/menubar-manage-template'
       ),
+      // overleaf-lab: LLM whole-document generators (title/abstract/keywords) registered
+      // for the Generate group (see insertMenuSections below).
       Path.resolve(
         __dirname,
-        '../modules/template-gallery/frontend/js/features/template/components/menubar-manage-template'
+        '../modules/llm/frontend/js/extensions/llm-file-menu-commands'
       ),
     ],
     insertMenuSections: [
+      // overleaf-lab (owner request 2026-08): the "AI Generate" group
+      // (smart_toy icon + Title/Abstract/Keywords) moved from the File menu
+      // to the INSERT menu — upstream-style placement for AI tools.
       Path.resolve(
         __dirname,
         '../modules/llm/frontend/js/extensions/llm-insert-menu-section'
+      ),
+    ],
+    // overleaf-lab: BYO LLM provider management embedded in Account Settings (reviewer #2);
+    // the core section renders it when present, else falls back to a link card.
+    llmUserSettingsSection: [
+      Path.resolve(
+        __dirname,
+        '../modules/llm/frontend/js/components/llm-settings-section'
       ),
     ],
     oauth2Server: [
       Path.resolve(
         __dirname,
         '../modules/git-bridge/frontend/js/widget/components/git-integration-widget.tsx'
-      ),
+      )
     ],
     personalMcpTokens: [
       Path.resolve(
         __dirname,
         '../modules/personal-mcp/frontend/js/components/personal-mcp-tokens-widget.tsx'
-      ),
+      )
     ],
     managedGroupSubscriptionEnrollmentNotification: [],
     managedGroupEnrollmentInvite: [],
@@ -1239,10 +1258,10 @@ module.exports = {
     settingsModalEditorTabSections: [],
     settingsModalSpellcheckSections: [],
     editorFloatingMenuActions: [
-      Path.resolve(
-        __dirname,
-        '../modules/llm/frontend/js/extensions/llm-fm-ask-ai'
-      ),
+        Path.resolve(
+            __dirname,
+            '../modules/llm/frontend/js/extensions/llm-fm-ask-ai.tsx'
+        ),
     ],
     errorLogsComponents: [],
     referenceIndices: [
@@ -1252,10 +1271,8 @@ module.exports = {
       ),
     ],
     railEntries: [
-      Path.resolve(
-        __dirname,
-        '../modules/llm/frontend/js/components/llm-rail-pane.tsx'
-      ),
+      // 左セクション（レール）の独自タブ: 英語翻訳・横並び表示。
+      // （AI アシスタントは llm モジュールのチャットレールに統合済みのため廃止）
       Path.resolve(
         __dirname,
         '../modules/local-llm-translation/frontend/js/rail/translation-rail-entry.tsx'
@@ -1263,6 +1280,11 @@ module.exports = {
       Path.resolve(
         __dirname,
         '../modules/local-llm-translation/frontend/js/rail/split-rail-entry.tsx'
+      ),
+      // llm モジュール由来: クラウド版相当の LLM チャットレールタブ。
+      Path.resolve(
+        __dirname,
+        '../modules/llm/frontend/js/components/llm-rail-pane'
       ),
     ],
     railPopovers: [],
@@ -1289,7 +1311,9 @@ module.exports = {
     'github-sync',
     'zotero',
     'bib-editor',
+    // 日本語→英語翻訳 API。
     'local-llm-translation',
+    // llm モジュール由来: BYO 接続先・チャット・Ask AI 等の LLM 統合。
     'llm',
   ],
   viewIncludes: {},
@@ -1320,21 +1344,16 @@ module.exports = {
   enablePandocConversions: process.env.ENABLE_PANDOC_CONVERSIONS === 'true',
 
   oauthProviders: {
-    ...(process.env.EXTERNAL_AUTH &&
-      process.env.EXTERNAL_AUTH.includes('oidc') && {
-        [process.env.OVERLEAF_OIDC_PROVIDER_ID || 'oidc']: {
-          name: process.env.OVERLEAF_OIDC_PROVIDER_NAME || 'OIDC Provider',
-          descriptionKey: process.env.OVERLEAF_OIDC_PROVIDER_DESCRIPTION,
-          descriptionOptions: {
-            link: process.env.OVERLEAF_OIDC_PROVIDER_INFO_LINK,
-          },
-          hideWhenNotLinked: process.env.OVERLEAF_OIDC_PROVIDER_HIDE_NOT_LINKED
-            ? process.env.OVERLEAF_OIDC_PROVIDER_HIDE_NOT_LINKED.toLowerCase() ===
-              'true'
-            : undefined,
-          linkPath: '/oidc/login',
-        },
-      }),
+    ...(process.env.EXTERNAL_AUTH && process.env.EXTERNAL_AUTH.includes('oidc') && {
+      [process.env.OVERLEAF_OIDC_PROVIDER_ID || 'oidc']: {
+        name: process.env.OVERLEAF_OIDC_PROVIDER_NAME || 'OIDC Provider',
+        descriptionKey: process.env.OVERLEAF_OIDC_PROVIDER_DESCRIPTION,
+        descriptionOptions: { link: process.env.OVERLEAF_OIDC_PROVIDER_INFO_LINK },
+        hideWhenNotLinked: process.env.OVERLEAF_OIDC_PROVIDER_HIDE_NOT_LINKED ?
+          process.env.OVERLEAF_OIDC_PROVIDER_HIDE_NOT_LINKED.toLowerCase() === 'true' : undefined,
+        linkPath: '/oidc/login',
+      },
+    }),
   },
 
   splitTestOverrides: {
@@ -1342,23 +1361,20 @@ module.exports = {
     'overleaf-code': 'enabled',
     'editor-tabs': 'enabled',
     'writefull-toolbar-migration': 'enabled',
-    ...(process.env.ENABLE_PANDOC_CONVERSIONS === 'true'
-      ? {
-          'import-docx': 'enabled',
-          'import-markdown': 'enabled',
-          'export-docx': 'enabled',
-          'export-html': 'enabled',
-          'export-markdown': 'enabled',
-        }
-      : {}),
-    ...(process.env.OVERLEAF_HISTORY_RESTORE?.toLowerCase() === 'true'
-      ? {
-          'history-ranges-support': 'enabled',
-          'revert-file': 'enabled',
-          'revert-project': 'enabled',
-        }
-      : {}),
+    ...(process.env.ENABLE_PANDOC_CONVERSIONS === 'true' ? {
+      'import-docx': 'enabled',
+      'import-markdown': 'enabled',
+      'export-docx': 'enabled',
+      'export-html': 'enabled',
+      'export-markdown': 'enabled',
+    } : {}),
+    ...(process.env.OVERLEAF_HISTORY_RESTORE?.toLowerCase() === 'true' ? {
+      'history-ranges-support': 'enabled',
+      'revert-file': 'enabled',
+      'revert-project': 'enabled',
+    } : {}),
   },
+
 }
 
 module.exports.mergeWith = function (overrides) {

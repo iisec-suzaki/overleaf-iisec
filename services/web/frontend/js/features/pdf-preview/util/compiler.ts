@@ -122,15 +122,6 @@ export default class DocumentCompiler {
       return
     }
 
-    let requestedRoot = this.getRootDocInfo()
-    // 結果待ちの間に別のメイン文書へ移っていたら、その文書のエラー表示を変更しない。
-    const isRequestedRootActive = () => {
-      const activeRoot = this.getRootDocInfo()
-      return requestedRoot.rootDocId
-        ? requestedRoot.rootDocId === activeRoot.rootDocId
-        : requestedRoot.rootResourcePath === activeRoot.rootResourcePath
-    }
-
     try {
       await this.openDocs.awaitBufferedOps(
         signalWithTimeout(this.signal, PENDING_OP_MAX_WAIT)
@@ -143,8 +134,7 @@ export default class DocumentCompiler {
 
       const t0 = performance.now()
 
-      requestedRoot = this.getRootDocInfo()
-      const { rootDocId, rootResourcePath } = requestedRoot
+      const { rootDocId, rootResourcePath } = this.getRootDocInfo()
 
       const body = {
         rootDoc_id: rootDocId,
@@ -174,7 +164,7 @@ export default class DocumentCompiler {
       this.setFirstRenderDone(() => firstRenderDone)
 
       // unset the error before it's set again later, so that components are recreated and events are tracked
-      if (isRequestedRootActive()) this.setError(undefined)
+      this.setError(undefined)
 
       data.options = {
         ...options,
@@ -187,10 +177,8 @@ export default class DocumentCompiler {
       this.setData(data)
     } catch (error: any) {
       debugConsole.error(error)
-      if (isRequestedRootActive()) {
-        this.cleanupCompileResult()
-        this.setError(error.info?.statusCode === 429 ? 'rate-limited' : 'error')
-      }
+      this.cleanupCompileResult()
+      this.setError(error.info?.statusCode === 429 ? 'rate-limited' : 'error')
     } finally {
       this.setCompiling(false)
     }
@@ -243,7 +231,7 @@ export default class DocumentCompiler {
     return postJSON(`/project/${this.projectId}/compile/stop?${params}`, {
       signal: this.signal,
     })
-      .catch((error) => {
+      .catch(error => {
         debugConsole.error(error)
         this.setError('error')
       })
@@ -258,7 +246,7 @@ export default class DocumentCompiler {
 
     return deleteJSON(`/project/${this.projectId}/output?${params}`, {
       signal: this.signal,
-    }).catch((error) => {
+    }).catch(error => {
       debugConsole.error(error)
       this.setError('clear-cache')
     })

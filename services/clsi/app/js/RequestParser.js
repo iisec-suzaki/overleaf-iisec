@@ -2,7 +2,15 @@ import { promisify } from 'node:util'
 import settings from '@overleaf/settings'
 import OutputCacheManager from './OutputCacheManager.js'
 
-const VALID_COMPILERS = ['pdflatex', 'latex', 'xelatex', 'lualatex']
+// 日本語組版エンジン pLaTeX/upLaTeX は TeX Live に同梱済み（iisec 追加）。
+const VALID_COMPILERS = [
+  'pdflatex',
+  'latex',
+  'xelatex',
+  'lualatex',
+  'platex',
+  'uplatex',
+]
 const MAX_TIMEOUT = 600
 const EDITOR_ID_REGEX = /^[a-f0-9-]{36}$/ // UUID
 const HISTORY_ID_REGEX = /^([0-9a-f]{24}|[1-9][0-9]{0,9})$/ // mongo id or postgres id

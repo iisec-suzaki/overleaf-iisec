@@ -26,6 +26,14 @@ const OPTIONS = [
     label: 'LuaLaTeX',
     value: 'lualatex',
   },
+  {
+    label: 'upLaTeX',
+    value: 'uplatex',
+  },
+  {
+    label: 'pLaTeX',
+    value: 'platex',
+  },
 ]
 
 describe('<CompilerSetting />', function () {

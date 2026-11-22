@@ -35,7 +35,13 @@ services:
       OVERLEAF_APP_NAME: Overleaf CE+ (Japanese + Local LLM)
       OVERLEAF_SITE_URL: ${OVERLEAF_SITE_URL:-http://localhost:8080}
       OVERLEAF_ADMIN_EMAIL: ${OVERLEAF_ADMIN_EMAIL:-admin@example.com}
+      # 空欄なら既定のフッター表記。
+      OVERLEAF_RIGHT_FOOTER: ${OVERLEAF_RIGHT_FOOTER:-}
       OVERLEAF_INVITE_TOKEN_SECRET: ${OVERLEAF_INVITE_TOKEN_SECRET:?Set OVERLEAF_INVITE_TOKEN_SECRET in .env}
+      # ブラウザのクッキーはポートを区別しないため、同じホストで運用する
+      # fork ステーション(8081, overleaf.sid)とセッションが衝突しないよう
+      # このスタックだけ別名にする。未指定なら overleaf.sid。
+      COOKIE_NAME: ${COOKIE_NAME:-overleaf-iisec.sid}
       OVERLEAF_MONGO_URL: mongodb://mongo/sharelatex?replicaSet=overleaf
       OVERLEAF_REDIS_HOST: redis
       REDIS_HOST: redis
@@ -54,6 +60,14 @@ services:
       LLM_ALLOW_USER_SETTINGS: ${LLM_ALLOW_USER_SETTINGS:-false}
       LLM_KEY_SECRET: ${LLM_KEY_SECRET:-}
       LLM_ADMIN_SETTINGS_PATH: /var/lib/overleaf/data/llm-admin-settings.json
+      # 個人用 MCP アクセストークン（iisec 追加モジュール）。
+      PERSONAL_MCP_ENABLED: ${PERSONAL_MCP_ENABLED:-false}
+      # 管理画面未設定時のフォールバックとして使う site 既定の接続先。
+      LLM_API_URL: ${LLM_SITE_API_URL:-}
+      LLM_API_KEY: ${LLM_SITE_API_KEY:-}
+      LLM_MODEL_NAME: ${LLM_SITE_MODEL_NAME:-}
+      # カンマ区切りで選択可能モデルの一覧（空なら LLM_MODEL_NAME を使用）。
+      LLM_AVAILABLE_MODELS: ${LLM_SITE_AVAILABLE_MODELS:-}
       # CE+ の Git 連携を有効化する。公開経路は既存 nginx の /git/<project-id>。
       GIT_BRIDGE_ENABLED: "true"
       GIT_BRIDGE_HOST: git-bridge
@@ -65,7 +79,6 @@ services:
       OVERLEAF_NON_ADMIN_CAN_PUBLISH_TEMPLATES: "false"
       # 任意で、サイト管理者以外にテンプレートを管理するアカウントを指定できる。
       OVERLEAF_TEMPLATES_USER_ID: ${OVERLEAF_TEMPLATES_USER_ID:-}
-      TEMPLATE_ALL_NAME: 研究室テンプレート
       # URL と別プロジェクトのソース・出力ファイルをリンクとして取り込む。
       # URL の取得は本体内の linked-url-proxy を通す。
       ENABLED_LINKED_FILE_TYPES: url,project_file,project_output_file

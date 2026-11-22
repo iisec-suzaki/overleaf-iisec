@@ -147,6 +147,10 @@ const ReviewTooltipMenuContent = memo<{ onAddComment: () => void; onHide: () => 
     >()
     const [visible, setVisible] = useState(false)
 
+    const llmEnabled = !!(getMeta('ol-ExposedSettings') as any)?.llmEnabled
+    // hide Ask AI when the admin disabled the chat feature at runtime
+    const llmChatEnabled = (window as any).__llmChatEnabled !== false
+
     const handleAddCommentClick = useCallback(() => {
       sendMB('add-comment', {
         location: 'tooltip',
@@ -270,17 +274,27 @@ const ReviewTooltipMenuContent = memo<{ onAddComment: () => void; onHide: () => 
           <MaterialIcon type="chat" />
           {t('add_comment')}
         </button>
-        {getMeta('ol-ExposedSettings').llmEnabled && (window as any).__llmChatEnabled !== false && (
+        {llmEnabled && llmChatEnabled && (
           <>
             <div className="review-tooltip-menu-divider" />
-            <button type="button" className="review-tooltip-menu-button" onClick={() => {
-              // 選択を失う前の範囲を、対象ビューと一緒に渡します。
-              const range = state.selection.main
-              document.dispatchEvent(new CustomEvent('llm-ask-ai-selection', { detail: {
-                view, text: state.sliceDoc(range.from, range.to), range: {from:range.from,to:range.to},
-              }}))
-              onHide()
-            }}><MaterialIcon type="smart_toy" />{t('ask_ai', 'Ask AI')}</button>
+            <button
+              className="review-tooltip-menu-button"
+              onClick={() => {
+                const selectedText = view.state.sliceDoc(
+                  state.selection.main.from,
+                  state.selection.main.to
+                )
+                document.dispatchEvent(
+                  new CustomEvent('llm-ask-ai-selection', {
+                    detail: { text: selectedText },
+                  })
+                )
+                onHide()
+              }}
+            >
+              <MaterialIcon type="smart_toy" />
+              {t('ask_ai', 'Ask AI')}
+            </button>
           </>
         )}
         {showChangesButtons && (

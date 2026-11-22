@@ -206,13 +206,14 @@ function LinkingSection() {
         <>
           <h3 id="personal-mcp">{t('personal_mcp_access_tokens')}</h3>
           <div className="settings-widgets-container">
-            {personalMcpComponents.map(({ import: { default: Widget }, path }) => (
-              <Widget key={path} />
-            ))}
+            {personalMcpComponents.map(
+              ({ import: { default: Widget }, path }) => (
+                <Widget key={path} />
+              )
+            )}
           </div>
         </>
       ) : null}
-
       {haslangFeedbackLinkingWidgets ||
       hasIntegrationLinkingSection ||
       hasReferencesLinkingSection ||

@@ -1,4 +1,3 @@
-import LLMUserSection from './llm-user-section'
 import SecuritySection from '@/features/settings/components/security-section'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -13,6 +12,7 @@ import LabsProgramSection from './labs-program-section'
 import SessionsSection from './sessions-section'
 import NewsletterSection from './newsletter-section'
 import LeaveSection from './leave-section'
+import LLMUserSection from './llm-user-section'
 import * as eventTracking from '../../../infrastructure/event-tracking'
 import { UserProvider } from '../../../shared/context/user-context'
 import { SSOProvider } from '../context/sso-context'
@@ -47,6 +47,8 @@ function SettingsPageRoot() {
 function SettingsPageContent() {
   const { t } = useTranslation()
   const { isOverleaf, labsEnabled } = getMeta('ol-ExposedSettings')
+  // overleaf-lab: gate for the LLM personal-settings section (instance flag).
+  const llmAllowUserSettings = !!(getMeta('ol-ExposedSettings') as any)?.llmAllowUserSettings
   const inNotificationsSplitTest = isSplitTestEnabled('email-notifications')
   return (
     <UserProvider>
@@ -82,7 +84,12 @@ function SettingsPageContent() {
               <LabsProgramSection />
             </>
           ) : null}
-          <LLMUserSection />
+          {llmAllowUserSettings ? (
+            <>
+              <hr />
+              <LLMUserSection />
+            </>
+          ) : null}
           <SessionsSection />
           {isOverleaf ? (
             <>
