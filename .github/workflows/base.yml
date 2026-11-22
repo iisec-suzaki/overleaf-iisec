@@ -1,0 +1,161 @@
+# 日本語 LaTeX 環境入りベースイメージのビルド・GHCR 公開です。
+#
+# 単独実行（main への push で Dockerfile が変わったとき／手動）と、
+# build.yml からの再利用ワークフロー（アプリ画像のベース缺失時の自動ビルド）
+# の両方で使われます。ベースイメージのタグは Dockerfile 内容のハッシュで、
+# 内容が変わったときだけ再生成されます（通常のアプリ変更では再利用されます）。
+#
+# ハッシュの計算式はこのファイルが一元的に定義し、build.yml は成果物タグを
+# needs 経由で受け取ります（二重定義しません）。
+name: base-images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - server-ce/Dockerfile-base
+      - Dockerfile.jp-base
+      - .github/workflows/base.yml
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      push_image:
+        description: 'true のとき GHCR へ push する（PR 検証では false）'
+        type: boolean
+        required: true
+    outputs:
+      tex_tag:
+        description: 'TeX Live ベースイメージのコンテンツハッシュタグ'
+        value: ${{ jobs.base.outputs.tex_tag }}
+      ja_tag:
+        description: '日本語 LaTeX ベースイメージのコンテンツハッシュタグ'
+        value: ${{ jobs.base.outputs.ja_tag }}
+      base_missing:
+        description: 'GHCR に該当ハッシュのベースイメージが無かった場合 true'
+        value: ${{ jobs.base.outputs.base_missing }}
+
+# 直接実行（main push / dispatch）は書き込み可。呼び出し元（PR）からは
+# job 単位で packages: read に絞られ、実効権限は読み取りになります。
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: base-images-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  # GHCR の名前空間・リポジトリ名は小文字である必要があります。
+  BASE_IMAGE: ghcr.io/iisec-suzaki/overleaf-iisec-base
+  JA_BASE_IMAGE: ghcr.io/iisec-suzaki/overleaf-iisec-ja-base
+  CACHE_IMAGE: ghcr.io/iisec-suzaki/overleaf-iisec-buildcache
+
+jobs:
+  base:
+    runs-on: ubuntu-latest
+    # TeX Live scheme-full の初回ビルドは非常に重いため余裕を持ちます。
+    timeout-minutes: 180
+    outputs:
+      tex_tag: ${{ steps.hash.outputs.tex_tag }}
+      ja_tag: ${{ steps.hash.outputs.ja_tag }}
+      base_missing: ${{ steps.resolve.outputs.base_missing }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # 直接実行（push / workflow_dispatch）は常に push、呼び出し元（PR 検証）は
+      # inputs.push_image の値に従います。inputs は直接実行では未定義のため、
+      # github.event_name で判定して後段の run から参照できる環境変数にします。
+      - name: Set push mode
+        id: pushmode
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_call" ]; then
+            echo "SHOULD_PUSH=${{ inputs.push_image && 'true' || 'false' }}" >> "$GITHUB_ENV"
+          else
+            echo "SHOULD_PUSH=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Compute content-hash tags
+        id: hash
+        run: |
+          tex_hash="$(sha256sum server-ce/Dockerfile-base | awk '{ print substr($1, 1, 12) }')"
+          ja_hash="$(cat server-ce/Dockerfile-base Dockerfile.jp-base | sha256sum | awk '{ print substr($1, 1, 12) }')"
+          echo "tex_tag=tex-${tex_hash}" >> "$GITHUB_OUTPUT"
+          echo "ja_tag=ja-${ja_hash}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # 既存イメージの確認（imagetools）とプルにトークンが要ります。
+      # 実効権限が read の実行（PR 検証）では push ステップが条件でスキップされ、
+      # 書き込み操作は起きません。
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check if the base image already exists
+        id: inspect
+        run: |
+          if docker buildx imagetools inspect "$JA_BASE_IMAGE:${{ steps.hash.outputs.ja_tag }}" >/dev/null 2>&1; then
+            echo "base_missing=false" >> "$GITHUB_OUTPUT"
+            echo "GHCR に既存: $JA_BASE_IMAGE:${{ steps.hash.outputs.ja_tag }}"
+          else
+            echo "base_missing=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build base image (TeX Live full)
+        if: steps.inspect.outputs.base_missing == 'true'
+        run: |
+          cache_from=(--cache-from "type=registry,ref=$CACHE_IMAGE:base")
+          cache_to=()
+          push=()
+          if [ "$SHOULD_PUSH" = "true" ]; then
+            cache_to=(--cache-to "type=registry,mode=max,image-manifest=true,oci=true,ref=$CACHE_IMAGE:base")
+            push=(--push -t "$BASE_IMAGE:latest")
+          fi
+          docker buildx build \
+            --platform linux/amd64 \
+            "${cache_from[@]}" "${cache_to[@]}" \
+            -f server-ce/Dockerfile-base \
+            -t "$BASE_IMAGE:${{ steps.hash.outputs.tex_tag }}" \
+            "${push[@]}" \
+            .
+
+      - name: Build ja-base image (Japanese LaTeX)
+        if: steps.inspect.outputs.base_missing == 'true'
+        run: |
+          cache_to=()
+          push=()
+          if [ "$SHOULD_PUSH" = "true" ]; then
+            cache_to=(--cache-to "type=registry,mode=max,image-manifest=true,oci=true,ref=$CACHE_IMAGE:base-ja")
+            push=(--push -t "$JA_BASE_IMAGE:latest")
+          fi
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg OVERLEAF_BASE_IMAGE="$BASE_IMAGE:${{ steps.hash.outputs.tex_tag }}" \
+            --cache-from "type=registry,ref=$CACHE_IMAGE:base-ja" \
+            "${cache_to[@]}" \
+            -f Dockerfile.jp-base \
+            -t "$JA_BASE_IMAGE:${{ steps.hash.outputs.ja_tag }}" \
+            "${push[@]}" \
+            .
+
+      - name: Resolve base status
+        id: resolve
+        # push 系の実行で再ビルドに成功したなら、缺失は解消済みとして報告します。
+        # （PR 検証で缺失のままのときだけ true を返し、呼び出し元のアプリ job を
+        # スキップ判定に使うのはこの値だけです。）
+        run: |
+          if [ "${{ steps.inspect.outputs.base_missing }}" = "true" ] && [ "$SHOULD_PUSH" != "true" ]; then
+            echo "base_missing=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "base_missing=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Explain PR-only limitation
+        if: steps.inspect.outputs.base_missing == 'true' && env.SHOULD_PUSH == 'false'
+        run: |
+          echo "::warning title=アプリ画像の検証はスキップ::ベースイメージの変更を含む PR では、アプリ画像 (server-ce/Dockerfile) の検証を GHCR 上のベース無しには実行できません。base.yml をマージ後に実行するか、main への push で base job が自動再生成します。"
+          echo "base_missing=true（アプリ画像ジョブはこの実行ではスキップされます）"
