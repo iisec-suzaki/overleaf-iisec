@@ -80,7 +80,7 @@ describe('RequestParser', () => {
       ctx.callback
         .calledWithMatch({
           message:
-            'compiler attribute should be one of: pdflatex, latex, xelatex, lualatex',
+            'compiler attribute should be one of: pdflatex, latex, xelatex, lualatex, platex, uplatex',
         })
         .should.equal(true)
     })
