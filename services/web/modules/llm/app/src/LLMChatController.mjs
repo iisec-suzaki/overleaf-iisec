@@ -264,11 +264,13 @@ async function chat(req, res) {
     let lane
     let spec
     let model
+    let rowReasoningEffort = ''
     try {
         const resolved = await resolveLane(userId, parseModelRef(modelRefString), feature)
         lane = resolved.lane
         spec = resolved.spec
         model = resolved.model
+        rowReasoningEffort = resolved.row?.reasoningEffort || ''
     }
     catch (err) {
         return sendError(res, err, 400)
@@ -341,9 +343,40 @@ async function chat(req, res) {
         ? [{ role: 'system', content: `${systemPreamble}\n\n${messages[0].content}` }, ...messages.slice(1)]
         : [{ role: 'system', content: systemPreamble }, ...messages]
 
+    // overleaf-lab (owner request 2026-11-21, 同日2改): チャットの推論レベル方針。
+    //  site lane : サーバーが選ぶ2段階のみ「none」|「medium」（既定 medium）。
+    //              Strata iq3_s 実測で minimal/none は思考0トークンのため
+    //              minimal を廃止、実際に思考が発火する最小が medium。
+    //              旧クライアントの 'minimal' 送信は medium に丸めます。
+    //  user BYO  : チャットペーンで利用者が選んだ値が最優先（行設定の上書き）。
+    //              未選択（既定）や不正値のときだけ プロバイダー行に保存した
+    //              値へフォールバックし、それも '' ならパラメータを送らず
+    //              バックエンド既定。つまり行設定=既定値、ペーン=都度上書き。
+    //              openaiCompatible 行のみ — anthropic/openai は別の
+    //              オプション体系のため従来動作のまま。
+    const USER_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high']
+    let chatReasoningEffort
+    if (lane === 'site' && spec.providerType === 'openaiCompatible') {
+        chatReasoningEffort = req.body.reasoningEffort === 'none' ? 'none' : 'medium'
+    }
+    else if (lane === 'user' && spec.providerType === 'openaiCompatible') {
+        chatReasoningEffort = USER_EFFORTS.includes(req.body.reasoningEffort)
+            ? req.body.reasoningEffort
+            : USER_EFFORTS.includes(rowReasoningEffort)
+                ? rowReasoningEffort
+                : undefined
+    }
+
     const started = Date.now()
     logger.info(
-        { projectId, lane, model, messages: messages.length, timeout: 300000 },
+        {
+            projectId,
+            lane,
+            model,
+            messages: messages.length,
+            timeout: 300000,
+            ...(chatReasoningEffort ? { reasoningEffort: chatReasoningEffort } : {}),
+        },
         '[LLM] chat: sending request'
     )
     try {
@@ -355,6 +388,16 @@ async function chat(req, res) {
                 temperature: 0.7,
                 timeoutMs: 300000,
                 usageMeta: { userId, action: 'chat', lane, projectId }, // overleaf-lab (usage meter)
+                // overleaf-lab: @ai-sdk/openai-compatible reads providerOptions under
+                // the provider's own name (createModel uses 'overleaf-llm') and maps
+                // reasoningEffort to the wire field `reasoning_effort`.
+                ...(chatReasoningEffort
+                    ? {
+                        providerOptions: {
+                            'overleaf-llm': { reasoningEffort: chatReasoningEffort },
+                        },
+                    }
+                    : {}),
             }
         )
         assertNonEmpty(text)

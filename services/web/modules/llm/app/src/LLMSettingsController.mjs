@@ -47,6 +47,13 @@ export const rowSchema = z
         apiKey: z.string().trim().max(2000).optional().default(''),
         models: z.array(z.string().trim().min(1).max(200)).min(1).max(100),
         completionModel: z.string().trim().max(200).optional().default(''),
+        // overleaf-lab (owner request 2026-11-21): 個人 BYO 行ごとの推論レベル。
+        // '' = 送らない（バックエンド既定）。'none' から 'high' までは
+        // OpenAI 互換の reasoning_effort にそのまま写す。
+        reasoningEffort: z
+            .enum(['', 'none', 'minimal', 'low', 'medium', 'high'])
+            .optional()
+            .default(''),
         enabled: z.boolean().optional().default(true),
     })
     .superRefine((value, ctx) => {
@@ -95,6 +102,7 @@ function publicRow(row) {
         hasKey: !!row.apiKey,
         models: row.models,
         completionModel: row.completionModel || '',
+        reasoningEffort: row.reasoningEffort || '',
         enabled: row.enabled !== false,
         createdAt: row.createdAt || new Date(0).toISOString()
     }
@@ -248,6 +256,7 @@ async function updateProvider(req, res) {
         baseUrl: req.body?.baseUrl !== undefined ? req.body.baseUrl : (current.baseUrl || ''),
         models: req.body?.models ?? current.models,
         completionModel: req.body?.completionModel !== undefined ? req.body.completionModel : (current.completionModel || ''),
+        reasoningEffort: req.body?.reasoningEffort !== undefined ? req.body.reasoningEffort : (current.reasoningEffort || ''),
         enabled: req.body?.enabled ?? current.enabled
     }
     const parsed = rowSchema.safeParse(merged)

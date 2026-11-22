@@ -43,6 +43,10 @@ export interface ChatExtras {
     currentFile?: string
     // false で自動参照をオフ（チェックボックスの OFF 状態）。
     projectContext?: boolean
+    // 推論レベル（2026-11-21 の運用者要望、同日2改）。site lane ではサーバーが
+    // 'none'|'medium' に収束（既定 medium）。個人 BYO lane では明示選択が行設定
+    // を上書きし、undefined（既定）のときだけ行設定の値へフォールバックする。
+    reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high'
 }
 
 export const useLLMChat = () => {
@@ -148,7 +152,7 @@ export const useLLMChat = () => {
         async (userMessage: string, baseMessages?: Message[], extras?: ChatExtras) => {
             if (abortControllerRef.current || !userMessage.trim()) return
             // 再実行（rerun）では extras を引き継ぐため ref にも保持する。
-            const effectiveExtras: ChatExtras = extras ?? { includeEditor: extrasRef.current.includeEditor }
+            const effectiveExtras: ChatExtras = extras ?? { includeEditor: extrasRef.current.includeEditor, reasoningEffort: extrasRef.current.reasoningEffort }
             extrasRef.current = effectiveExtras
             const newMessages: Message[] = [
                 ...(baseMessages || messagesRef.current),
@@ -183,6 +187,9 @@ export const useLLMChat = () => {
                         // オン/オフを伝え、サーバー側が質問に合うファイルを拾う。
                         currentFile: editorContext?.file || effectiveExtras.currentFile || undefined,
                         projectContext: effectiveExtras.projectContext !== false,
+                        // 推論レベル（site はサーバーが none|medium に収束、BYO は
+                        // 明示値が行設定を上書き、undefined は行設定へフォールバック）。
+                        reasoningEffort: effectiveExtras.reasoningEffort,
                     },
                     signal: controller.signal,
                     swallowAbortError: false,

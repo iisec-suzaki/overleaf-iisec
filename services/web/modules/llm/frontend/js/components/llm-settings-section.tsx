@@ -27,6 +27,7 @@ type ProviderRow = {
     hasKey: boolean
     models: string[]
     completionModel: string
+    reasoningEffort: string
     enabled: boolean
     createdAt?: string
 }
@@ -41,6 +42,7 @@ type Draft = {
     keepKey: boolean
     models: string[]
     completionModel: string
+    reasoningEffort: string
     enabled: boolean
     storedKey: boolean
 }
@@ -58,6 +60,7 @@ function defaultDraft(): Draft {
         keepKey: false,
         models: [],
         completionModel: '',
+        reasoningEffort: '',
         enabled: true,
         storedKey: false,
     }
@@ -74,6 +77,7 @@ function draftFromRow(row: ProviderRow): Draft {
         keepKey: true,
         models: [...row.models],
         completionModel: row.completionModel || '',
+        reasoningEffort: row.reasoningEffort || '',
         enabled: row.enabled,
         storedKey: row.hasKey,
     }
@@ -205,6 +209,7 @@ export default function LLMSettingsSection({ compact = false }: { compact?: bool
                 baseUrl: draft.baseUrl.trim(),
                 models: draft.models,
                 completionModel: draft.completionModel,
+                reasoningEffort: draft.reasoningEffort,
                 enabled: draft.enabled,
             }
             if (draft.isNew) {
@@ -641,6 +646,35 @@ export default function LLMSettingsSection({ compact = false }: { compact?: bool
                             </select>
                         </OLFormGroup>
                     )}
+
+                    <OLFormGroup>
+                        <OLFormLabel>
+                            {t('llm_byo_reasoning', 'Reasoning effort (chat default)')}
+                        </OLFormLabel>
+                        {/* Native select: OLFormControl は input を描画するため select は
+                            ネイティブ要素のまま使う（上の providerType と同じ理由）。 */}
+                        <select
+                            aria-label={t('llm_byo_reasoning', 'Reasoning effort (chat default)')}
+                            className="form-select"
+                            value={draft.reasoningEffort}
+                            onChange={(e) => setField('reasoningEffort', e.target.value)}
+                        >
+                            <option value="">
+                                {t('llm_byo_reasoning_default', 'Backend default (not sent)')}
+                            </option>
+                            <option value="none">none</option>
+                            <option value="minimal">minimal</option>
+                            <option value="low">low</option>
+                            <option value="medium">medium</option>
+                            <option value="high">high</option>
+                        </select>
+                        <OLFormText variant="text">
+                            {t(
+                                'llm_byo_reasoning_note',
+                                'Default reasoning_effort sent on chat requests to OpenAI-compatible backends (vLLM, Strata, ...). A choice in the chat pane overrides it for that session.'
+                            )}
+                        </OLFormText>
+                    </OLFormGroup>
 
                     <div className="llm-buo-enabled">
                         <label>
