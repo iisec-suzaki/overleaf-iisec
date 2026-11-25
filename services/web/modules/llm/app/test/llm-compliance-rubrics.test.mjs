@@ -16,6 +16,8 @@ import {
     findUserJobDoc,
     countUserActiveJobs,
 } from '../src/models/LLMReviewJob.mjs' // overleaf-lab (audit M2)
+// overleaf-lab: paragraph-aware chunking for documents too big for one review pass.
+import { splitIntoChunks } from '../src/llm-chunk.mjs'
 
 test('sanitizeComplianceRubrics: non-array -> null (caller keeps existing)', () => {
     assert.equal(sanitizeComplianceRubrics(undefined), null)
@@ -113,4 +115,47 @@ test('audit M2: persist helpers are non-fatal without a Mongo connection', async
     assert.equal(await countUserActiveJobs('u1'), null)
     await persistJobFinalStatus('job-x', { status: 'cancelled' })
     await persistStuckJobs('restarted')
+})
+
+// overleaf-lab: splitIntoChunks (port of the translation service's split_chunks).
+// The chunking must be lossless (chunks concatenate back to the original), never
+// exceed the budget, and prefer paragraph boundaries so a review chunk is a whole
+// run of paragraphs rather than a slice through a sentence.
+test('splitIntoChunks: text within budget -> one chunk, unchanged (and guards)', () => {
+    const text = 'hello\n\nworld'
+    assert.deepEqual(splitIntoChunks(text, 100), [text])
+    assert.deepEqual(splitIntoChunks('', 100), [''])
+    assert.throws(() => splitIntoChunks('x', 0))
+})
+
+test('splitIntoChunks: many paragraphs -> bounded, paragraph-aligned, lossless', () => {
+    const para = `${'A'.repeat(200)}\n\n` // one paragraph, exactly 202 chars
+    const text = para.repeat(10) // 2020 chars, four paragraphs fit in 700
+    const maxChars = 700
+    const chunks = splitIntoChunks(text, maxChars)
+    assert.ok(chunks.length > 1, 'long text must split')
+    for (const c of chunks) assert.ok(c.length <= maxChars, `chunk too big: ${c.length}`)
+    assert.equal(chunks.join(''), text) // lossless concatenation, no overlap or gap
+    // Paragraph-aligned: every chunk is a whole number of paragraphs.
+    for (const c of chunks) assert.equal(c.length % para.length, 0)
+})
+
+test('splitIntoChunks: single giant line with spaces -> bounded by word, lossless', () => {
+    const text = 'word '.repeat(1000) // 5000 chars, spaces but no newlines
+    const maxChars = 400
+    const chunks = splitIntoChunks(text, maxChars)
+    assert.ok(chunks.length > 1)
+    for (const c of chunks) assert.ok(c.length <= maxChars, `chunk too big: ${c.length}`)
+    assert.equal(chunks.join(''), text)
+})
+
+test('splitIntoChunks: unbreakable token run -> hard cut exactly at the limit', () => {
+    const text = 'Z'.repeat(950) // no space or newline anywhere
+    const maxChars = 400
+    const chunks = splitIntoChunks(text, maxChars)
+    assert.deepEqual(
+        chunks.map(c => c.length),
+        [400, 400, 150]
+    )
+    assert.equal(chunks.join(''), text)
 })
