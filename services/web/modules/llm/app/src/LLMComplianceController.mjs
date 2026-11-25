@@ -19,6 +19,9 @@ import {
     findUserJobDoc,
     countUserActiveJobs,
 } from './models/LLMReviewJob.mjs'
+// overleaf-lab: paragraph-aware chunking for documents too big for one pass (port of
+// the translation service's split_chunks; kept in a pure module so it is unit-testable).
+import { splitIntoChunks } from './llm-chunk.mjs'
 
 // overleaf-lab: in-memory job queue for compliance reviews. A review sends the
 // whole project to the LLM and can run for minutes, so we run one at a time per
@@ -924,21 +927,63 @@ async function performReview(job) {
     // thorough pass may legitimately enumerate dozens of figures in its analysis, and
     // writing that enumeration out IS how the model verifies (starving it pushes the
     // work back into attention, which is what multi-pass exists to avoid).
-    const headroom = maxContextTokens - promptTokens - CONTEXT_SAFETY_MARGIN
-    const perPassBudget = Math.min(reviewMaxTokens, headroom)
+    let perPassBudget = Math.min(
+        reviewMaxTokens,
+        maxContextTokens - promptTokens - CONTEXT_SAFETY_MARGIN
+    )
+
+    // overleaf-lab: the whole project does not leave even MIN_ANSWER_TOKENS of answer
+    // room in a single pass. Instead of refusing with too_long, fall back to CHUNKED
+    // review: split the assembled document into paragraph-bounded chunks (the same
+    // algorithm the translation service uses) and run every requirement over every
+    // chunk, folded into one report item per requirement by the sub-pass machinery
+    // below. This branch is ONLY reachable when a single pass cannot fit, so the normal
+    // fits-in-one-pass path is byte-identical to before.
+    let chunked = false
+    let passUnits = null
     if (perPassBudget < MIN_ANSWER_TOKENS) {
-        // overleaf-lab: report the minimum reserve too. Without it the UI could only
-        // show "prompt / limit", which can look like it fits while the refusal is
-        // really caused by the answer room pushing the total over.
-        return {
-            type: 'error',
-            errorCode: 'too_long',
-            message:
-                'Document is too long for a single-pass review with the configured context window',
-            documentTokensEstimate: promptTokens,
-            maxContextTokens,
-            reviewMaxTokens: MIN_ANSWER_TOKENS,
+        // Each chunk sub-pass sends ONLY its own chunk + one requirement + the system
+        // prompt (no scan hints), so budget the chunk against that fixed overhead and
+        // reserve the minimum answer room. REVIEW_CHARS_PER_TOKEN turns the token
+        // budget into a character budget that estimateTokens cannot exceed.
+        const perPassOverheadTokens =
+            estimateTokens(rubric.guidelines) +
+            estimateTokens(prompts.reviewSystemPrompt) +
+            100
+        const chunkTokenBudget =
+            maxContextTokens - CONTEXT_SAFETY_MARGIN - MIN_ANSWER_TOKENS - perPassOverheadTokens
+        const chunkMaxChars = Math.max(500, Math.floor(chunkTokenBudget * REVIEW_CHARS_PER_TOKEN))
+        const chunks = chunkTokenBudget > 0 ? splitIntoChunks(assembled, chunkMaxChars) : []
+        // A document with no break anywhere (one blob bigger than the window) still
+        // cannot be reviewed: keep the original refusal so the user gets a real answer.
+        if (chunks.length <= 1 || estimateTokens(chunks[0]) > chunkTokenBudget) {
+            // overleaf-lab: report the minimum reserve too. Without it the UI could only
+            // show "prompt / limit", which can look like it fits while the refusal is
+            // really caused by the answer room pushing the total over.
+            return {
+                type: 'error',
+                errorCode: 'too_long',
+                message:
+                    'Document is too long for a single-pass review with the configured context window',
+                documentTokensEstimate: promptTokens,
+                maxContextTokens,
+                reviewMaxTokens: MIN_ANSWER_TOKENS,
+            }
         }
+        passUnits = chunks.map((text, i) => ({ path: `part ${i + 1}/${chunks.length}`, text }))
+        // Give each chunk pass the same generous answer room a single pass would have had.
+        perPassBudget = Math.min(
+            reviewMaxTokens,
+            maxContextTokens - CONTEXT_SAFETY_MARGIN - perPassOverheadTokens - chunkTokenBudget
+        )
+        if (perPassBudget < MIN_ANSWER_TOKENS) {
+            perPassBudget = MIN_ANSWER_TOKENS
+        }
+        chunked = true
+        logger.info(
+            { projectId, chunks: chunks.length, chunkMaxChars, chunkTokenBudget },
+            '[LLM] compliance: document too long for one pass, switching to chunked review'
+        )
     }
 
     // Reachability check: only when an explicit review model is configured.
@@ -989,10 +1034,16 @@ async function performReview(job) {
     }
 
     // overleaf-lab: pass-based progress, read by the status endpoint. A [per-file]
-    // requirement counts one pass per source file.
+    // requirement counts one pass per source file; a chunked review counts one pass
+    // per requirement per document chunk.
     let mainPassCount = requirements.reduce(
         (n, r) =>
-            n + (isPerFileRequirement(r) && strippedDocs.length > 1 ? strippedDocs.length : 1),
+            n +
+            (chunked
+                ? passUnits.length
+                : isPerFileRequirement(r) && strippedDocs.length > 1
+                  ? strippedDocs.length
+                  : 1),
         0
     )
     // overleaf-lab: F6 — hard cap on passes per job. [per-file] requirements on a
@@ -1018,12 +1069,16 @@ async function performReview(job) {
         if (job.status === 'cancelled') {
             throw new Error('review cancelled between passes')
         }
-        const perFile = isPerFileRequirement(requirements[i]) && strippedDocs.length > 1
+        // Chunked review reuses the sub-pass machinery below: every requirement runs
+        // one sub-pass per document chunk. Otherwise only [per-file] requirements fan
+        // out (one sub-pass per source file).
+        const perFile =
+            chunked || (isPerFileRequirement(requirements[i]) && strippedDocs.length > 1)
         const requirement = stripPerFileMarker(requirements[i])
         // overleaf-lab: F6 — hard stop at the configured pass budget. This and
         // every remaining requirement are reported as 'skipped' below so the
         // report stays complete and honest about coverage.
-        const passCost = perFile ? strippedDocs.length : 1
+        const passCost = chunked ? passUnits.length : perFile ? strippedDocs.length : 1
         if (completedPasses + passCost > MAX_PASSES_PER_JOB) {
             for (let k = i; k < requirements.length; k++) {
                 allItems.push({
@@ -1045,13 +1100,20 @@ async function performReview(job) {
         // one extra read of the project. Lean by design: no retry (small prompts do
         // not truncate), a failed file becomes "n.a." for that file only.
         if (perFile) {
+            // overleaf-lab: chunked review feeds this same branch its paragraph-bounded
+            // chunks (passUnits); a [per-file] requirement feeds it the source files.
+            // Each unit is reviewed with ONLY itself in context, then folded into one
+            // report item by mergeFileItems (any missing wins, else partial, else ok).
+            const units = chunked ? passUnits : strippedDocs
+            const unitNoun = chunked ? 'part' : 'file'
+            const headerTag = chunked ? 'PART' : 'FILE'
             const fileResults = []
-            for (let f = 0; f < strippedDocs.length; f++) {
+            for (let f = 0; f < units.length; f++) {
                 if (job.status === 'cancelled') {
                     throw new Error('review cancelled between passes')
                 }
-                const doc = strippedDocs[f]
-                job.currentRequirement = `${requirement} (file ${f + 1}/${strippedDocs.length}: ${doc.path})`
+                const doc = units[f]
+                job.currentRequirement = `${requirement} (${unitNoun} ${f + 1}/${units.length}: ${doc.path})`
                     .replace(/\s+/g, ' ')
                     .slice(0, 160)
                 const subBody = {
@@ -1061,8 +1123,8 @@ async function performReview(job) {
                         {
                             role: 'user',
                             content:
-                                `DOCUMENT (one file of a larger project):\n% ===== FILE: ${doc.path} =====\n${doc.text}\n\n` +
-                                `GUIDELINES (check ONLY these, in THIS file only):\n${
+                                `DOCUMENT (one ${unitNoun} of a larger project):\n% ===== ${headerTag}: ${doc.path} =====\n${doc.text}\n\n` +
+                                `GUIDELINES (check ONLY these, in THIS ${unitNoun} only):\n${
                                     preamble ? `${preamble}\n` : ''
                                 }${requirement}`,
                         },

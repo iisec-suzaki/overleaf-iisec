@@ -11,7 +11,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getJSON, postJSON } from '@/infrastructure/fetch-json'
-import { runAsync } from '@/shared/hooks/use-async'
 import OLButton from '@/shared/components/ol/ol-button'
 import OLFormGroup from '@/shared/components/ol/ol-form-group'
 import OLFormLabel from '@/shared/components/ol/ol-form-label'
@@ -75,32 +74,24 @@ export default function LLMComplianceSettings() {
         setRubrics(prev => prev.filter(r => r.id !== id))
     }
 
-    const save = () => {
+    const save = async () => {
         setSaveError(null)
         setSaving(true)
         setSaved(false)
-        runAsync(async (done, fail) => {
-            try {
-                const data = await postJSON('/user/llm/compliance', {
-                    body: { rubrics },
-                })
-                setRubrics(Array.isArray(data?.rubrics) ? data.rubrics : rubrics)
-                setInherited(false)
-                done()
-            }
-            catch (err: any) {
-                fail(err?.data?.message || err?.message || t('save_failed', 'Saving failed'))
-            }
-        })
-            .then(() => {
-                setSaving(false)
-                setSaved(true)
-                setTimeout(() => setSaved(false), 4000)
+        try {
+            const data = await postJSON('/user/llm/compliance', {
+                body: { rubrics },
             })
-            .catch((err: string) => {
-                setSaving(false)
-                setSaveError(typeof err === 'string' ? err : 'Saving failed')
-            })
+            setRubrics(Array.isArray(data?.rubrics) ? data.rubrics : rubrics)
+            setInherited(false)
+            setSaving(false)
+            setSaved(true)
+            setTimeout(() => setSaved(false), 4000)
+        }
+        catch (err: any) {
+            setSaving(false)
+            setSaveError(err?.data?.message || err?.message || t('save_failed', 'Saving failed'))
+        }
     }
 
     const resetToInherited = () => load()
