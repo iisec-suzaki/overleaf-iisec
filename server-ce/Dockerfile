@@ -35,7 +35,8 @@ RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/usr/local/share/.cache/yarn,id=server-ce-yarn-fallback-cache \
     --mount=type=cache,target=/overleaf/services/web/.cache,id=server-ce-webpack-cache \
     --mount=type=tmpfs,target=/tmp \
-    node genScript compile | bash
+    rm -f /root/.yarn/berry/cache/*overleaf-dictionaries*; \
+    node genScript compile > /tmp/gen.bash && export NODE_OPTIONS=--max-old-space-size=6144 && ok=0; for i in 1 2 3 4; do bash -x /tmp/gen.bash && { ok=1; break; }; echo "attempt $i rc=$?, retrying"; sleep 3; done; [ "$ok" = 1 ]
 
 # Enable Yarn PnP resolution for all Node.js processes
 # -----------------------------------------------------
