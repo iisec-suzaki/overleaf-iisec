@@ -145,6 +145,44 @@ export default {
         )
         logger.debug({}, '[LLM] Route registered: POST /user/llm/compliance')
 
+        // overleaf-lab (rubric sharing prototype, 2026-11-26, owner request): a
+        // shared rubric gallery, modeled on the LaTeX template gallery. The
+        // gallery page and its JSON routes live under /user/llm/compliance/*.
+        webRouter.get(
+            '/user/llm/compliance/gallery',
+            AuthenticationController.requireLogin(),
+            LLMSettingsController.rubricGalleryPage
+        )
+        logger.debug({}, '[LLM] Route registered: GET /user/llm/compliance/gallery (gallery page)')
+
+        webRouter.get(
+            '/user/llm/compliance/shared',
+            AuthenticationController.requireLogin(),
+            LLMSettingsController.getSharedCompliance
+        )
+        logger.debug({}, '[LLM] Route registered: GET /user/llm/compliance/shared')
+
+        webRouter.post(
+            '/user/llm/compliance/shared/import',
+            AuthenticationController.requireLogin(),
+            LLMSettingsController.importSharedCompliance
+        )
+        logger.debug({}, '[LLM] Route registered: POST /user/llm/compliance/shared/import')
+
+        webRouter.post(
+            '/user/llm/compliance/shared/:shareId/unpublish',
+            AuthenticationController.requireLogin(),
+            LLMSettingsController.unpublishSharedCompliance
+        )
+        logger.debug({}, '[LLM] Route registered: POST /user/llm/compliance/shared/:shareId/unpublish')
+
+        webRouter.post(
+            '/user/llm/compliance/shared',
+            AuthenticationController.requireLogin(),
+            LLMSettingsController.publishSharedCompliance
+        )
+        logger.debug({}, '[LLM] Route registered: POST /user/llm/compliance/shared')
+
         // overleaf-lab: BYO provider rows (user-scoped). Every handler enforces
         // the LLM_ALLOW_USER_SETTINGS gate itself (F1): the router registers them
         // unconditionally, and disabled deployments answer 403, so there is no

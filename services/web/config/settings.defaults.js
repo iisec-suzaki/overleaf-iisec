@@ -1286,6 +1286,12 @@ module.exports = {
         __dirname,
         '../modules/llm/frontend/js/components/llm-rail-pane'
       ),
+      // llm モジュール由来（2026-11-26）: 文書レビューを「AI Assistant」から
+      // 独立させた Compliance Review レールタブ（AI Assistant の直後に表示）。
+      Path.resolve(
+        __dirname,
+        '../modules/llm/frontend/js/components/llm-compliance-rail-pane'
+      ),
     ],
     railPopovers: [],
     railActions: [],

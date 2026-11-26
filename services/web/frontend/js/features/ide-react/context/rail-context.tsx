@@ -32,6 +32,9 @@ export type RailTabKey =
   | 'split-view'
   // 追加（llm モジュール由来）: クラウド版相当の LLM チャットレールタブ。
   | 'llm-chat'
+  // 追加（llm モジュール由来, 2026-11-26）: 「AI Assistant」から文書レビューを
+  // 独立させた Compliance Review レールタブ（レビュー項目の共有画面と連携）。
+  | 'llm-compliance'
 
 export type RailModalKey =
   | 'keyboard-shortcuts'

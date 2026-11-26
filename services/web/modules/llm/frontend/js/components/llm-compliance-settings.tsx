@@ -120,6 +120,15 @@ export default function LLMComplianceSettings() {
                 )}
             </p>
 
+            {/* overleaf-lab (rubric sharing prototype, 2026-11-26): entry point to
+                the shared review-item gallery (modeled on the template gallery). */}
+            <div className="ol-llm-admin-settings__mb-lg">
+                <a href="/user/llm/compliance/gallery" className="btn btn-secondary btn-sm">
+                    <MaterialIcon type="group_work" className="me-1 ol-llm-admin-settings__icon-base" />
+                    {t('compliance_open_gallery', 'Shared review-item gallery')}
+                </a>
+            </div>
+
             {inherited && (
                 <div className="ol-llm-admin-settings__mb-lg">
                     <OLNotification
@@ -131,7 +140,6 @@ export default function LLMComplianceSettings() {
                     />
                 </div>
             )}
-
             {rubrics.length === 0 && (
                 <p className="ol-llm-admin-settings__muted-md">
                     {t(
