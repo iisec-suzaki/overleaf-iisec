@@ -160,3 +160,64 @@ export async function getUsageSummary({ userId, days = 30 } = {}) {
 }
 
 export { dayBucket }
+
+// overleaf-lab (2026-11-26, owner request): per-user LLM usage across the whole
+// site (for the admin /admin/usage page). Groups the window by userId.
+// Returns { days, users:[{userId, calls, inputTokens, outputTokens, totalTokens}], totals }
+// or null when the store is unreachable.
+export async function getUsageByUser({ days = 30 } = {}) {
+    const limit = Math.min(Math.max(Number(days) || 30, 1), 365)
+    try {
+        const from = new Date()
+        from.setHours(0, 0, 0, 0)
+        from.setDate(from.getDate() - (limit - 1))
+        const filter = { createdAt: { $gte: from } }
+        const [perUser, tot] = await Promise.all([
+            LLMUsage.aggregate([
+                { $match: filter },
+                {
+                    $group: {
+                        _id: '$userId',
+                        calls: { $sum: 1 },
+                        inputTokens: { $sum: '$inputTokens' },
+                        outputTokens: { $sum: '$outputTokens' },
+                        totalTokens: { $sum: '$totalTokens' },
+                    },
+                },
+                { $sort: { totalTokens: -1 } },
+                { $limit: 200 },
+            ]),
+            LLMUsage.aggregate([
+                { $match: filter },
+                {
+                    $group: {
+                        _id: null,
+                        calls: { $sum: 1 },
+                        inputTokens: { $sum: '$inputTokens' },
+                        outputTokens: { $sum: '$outputTokens' },
+                        totalTokens: { $sum: '$totalTokens' },
+                    },
+                },
+            ]),
+        ])
+        return {
+            days: limit,
+            users: perUser.map(r => ({
+                userId: r._id || 'unknown',
+                calls: r.calls || 0,
+                inputTokens: r.inputTokens || 0,
+                outputTokens: r.outputTokens || 0,
+                totalTokens: r.totalTokens || 0,
+            })),
+            totals: {
+                calls: tot[0]?.calls || 0,
+                inputTokens: tot[0]?.inputTokens || 0,
+                outputTokens: tot[0]?.outputTokens || 0,
+                totalTokens: tot[0]?.totalTokens || 0,
+            },
+        }
+    } catch (err) {
+        logger.debug({ err }, '[LLMUsage] by-user summary failed (non-fatal)')
+        return null
+    }
+}

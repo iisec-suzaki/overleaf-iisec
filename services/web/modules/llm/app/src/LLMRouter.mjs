@@ -282,6 +282,16 @@ export default {
         )
         logger.debug({}, '[LLM] Route registered: GET /user/llm-settings (settings page)')
 
+        // overleaf-lab (2026-11-26, owner request): Compliance Review (check item /
+        // checklist) config on its OWN page, split out of /user/llm-settings and
+        // reachable from the editor's Settings (gear) menu. Login-gated only.
+        webRouter.get(
+            '/user/compliance-review',
+            AuthenticationController.requireLogin(),
+            LLMSettingsController.compliancePage
+        )
+        logger.debug({}, '[LLM] Route registered: GET /user/compliance-review (compliance page)')
+
         if (Settings.llm && Settings.llm.allowUserSettings) {
             logger.debug({}, '[LLM] BYO enabled by deployment config')
         } else {
@@ -336,5 +346,21 @@ export default {
             LLMAdminController.usageSummary
         )
         logger.debug({}, '[LLM] Route registered: GET /admin/llm/usage')
+
+        // overleaf-lab (2026-11-26, owner request): admin-only combined
+        // LLM + MCP usage page (who, how much).
+        webRouter.get(
+            '/admin/usage',
+            AuthorizationMiddleware.ensureUserIsSiteAdmin,
+            LLMAdminController.usageAdminPage
+        )
+        logger.debug({}, '[LLM] Route registered: GET /admin/usage')
+
+        webRouter.get(
+            '/admin/usage/json',
+            AuthorizationMiddleware.ensureUserIsSiteAdmin,
+            LLMAdminController.usageReport
+        )
+        logger.debug({}, '[LLM] Route registered: GET /admin/usage/json')
     }
 }

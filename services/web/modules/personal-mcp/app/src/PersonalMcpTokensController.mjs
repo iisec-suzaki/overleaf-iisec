@@ -6,6 +6,7 @@ import TokenManager, {
   PERSONAL_MCP_SCOPE,
   PERSONAL_MCP_WRITE_SCOPE,
 } from "./PersonalMcpTokenManager.mjs";
+import { summarizeByToken } from "./PersonalMcpUsage.mjs";
 
 // The alert wording mirrors the granted scope, so the account owner always
 // sees whether the new token was read-only or read-write.
@@ -35,7 +36,23 @@ const PersonalMcpTokensController = {
     if (!user) return res.sendStatus(401);
     try {
       const tokens = await TokenManager.listTokens(user._id);
-      return res.json({ tokens });
+      // overleaf-lab (2026-11-26, owner request): show per-token read/write data
+      // volume (last 30 days) alongside each token. Aggregation is non-fatal: if
+      // the usage store is unreachable the columns just read zero.
+      const usage = await summarizeByToken(user._id, { days: 30 });
+      const byId = new Map(
+        (usage?.tokens || []).map((t) => [t.tokenId, t]),
+      );
+      const enriched = tokens.map((t) => {
+        const u = byId.get(t.id);
+        return {
+          ...t,
+          readBytes: u?.readBytes || 0,
+          writeBytes: u?.writeBytes || 0,
+          mcpCalls: u?.calls || 0,
+        };
+      });
+      return res.json({ tokens: enriched, usageWindowDays: usage?.days || 30 });
     } catch (error) {
       logger.error(
         { error, userId: user._id },

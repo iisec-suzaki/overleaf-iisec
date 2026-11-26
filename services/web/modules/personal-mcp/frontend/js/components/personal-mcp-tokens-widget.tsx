@@ -14,6 +14,10 @@ type McpToken = {
   createdAt: string;
   expiresAt: string;
   lastUsedAt?: string;
+  // overleaf-lab: data volume moved via this token over the recent window.
+  readBytes?: number;
+  writeBytes?: number;
+  mcpCalls?: number;
 };
 
 type CreatedMcpToken = {
@@ -40,6 +44,16 @@ function formatDateTime(value?: string | null): string {
   if (!value) return "—";
   const date = new Date(value);
   return isNaN(date.getTime()) ? "—" : date.toLocaleString();
+}
+
+// overleaf-lab: human-readable byte volume (B / KB / MB / GB), base 1024.
+function formatBytes(n?: number | null): string {
+  if (!n || n <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.min(Math.floor(Math.log(n) / Math.log(1024)), units.length - 1);
+  const val = n / Math.pow(1024, i);
+  const rounded = i === 0 ? String(Math.round(val)) : val.toFixed(val >= 100 ? 0 : 1);
+  return `${rounded} ${units[i]}`;
 }
 
 export const PersonalMcpTokensWidget = function PersonalMcpTokensWidget() {
@@ -126,6 +140,12 @@ export const PersonalMcpTokensWidget = function PersonalMcpTokensWidget() {
         ) : null}
 
         <h4 className="ui-heading">{t("user_personal_access_tokens")}</h4>
+        <p className="small text-muted">
+          {t(
+            "personal_mcp_volume_note",
+            "Read / Written show the data volume moved through each token over the last 30 days.",
+          )}
+        </p>
         {tokens.length ? (
           <table className="table">
             <thead>
@@ -136,6 +156,12 @@ export const PersonalMcpTokensWidget = function PersonalMcpTokensWidget() {
                 <th>{t("personal_mcp_created")}</th>
                 <th>{t("personal_mcp_expires")}</th>
                 <th>{t("personal_mcp_last_used")}</th>
+                <th className="text-nowrap">
+                  {t("personal_mcp_read_volume", "Read")}
+                </th>
+                <th className="text-nowrap">
+                  {t("personal_mcp_write_volume", "Written")}
+                </th>
                 <th />
               </tr>
             </thead>
@@ -150,6 +176,8 @@ export const PersonalMcpTokensWidget = function PersonalMcpTokensWidget() {
                   <td className="small">{formatDateTime(token.createdAt)}</td>
                   <td className="small">{formatDateTime(token.expiresAt)}</td>
                   <td className="small">{formatDateTime(token.lastUsedAt)}</td>
+                  <td className="small">{formatBytes(token.readBytes)}</td>
+                  <td className="small">{formatBytes(token.writeBytes)}</td>
                   <td>
                     <OLButton
                       variant="danger"

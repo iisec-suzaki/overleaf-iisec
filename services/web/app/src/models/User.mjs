@@ -270,6 +270,11 @@ export const UserSchema = new Schema(
     // LLM settings page). Free-form documents of the shared rubric shape
     // (id/name/guidelines/scanPatterns), sanitized by the module's shared helper.
     llmComplianceRubrics: { type: [Object], default: [] },
+    // overleaf-lab (2026-11-26): per-user compliance CHECKLISTS — named, ordered
+    // groups of the user's own check items (id + itemIds[]). A checklist lets the
+    // reviewer run a whole curated set at once instead of a single item. Personal,
+    // like the rubrics; sanitized by the module's shared helper.
+    llmComplianceChecklists: { type: [Object], default: [] },
     // Each row is a free-form document shaped by the module's row schema
     // (id/name/providerType/baseUrl/apiKey[encrypted]/models/completionModel/enabled).
     llmProviders: { type: [Object], default: [] },
