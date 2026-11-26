@@ -27,10 +27,20 @@ interface ComplianceRubric {
     scanPatterns?: string
 }
 
+// overleaf-lab (2026-11-26): a curated checklist — a named, ordered group of the
+// user's own check items. Curated here; runnable as a whole from the review pane.
+interface ComplianceChecklist {
+    id: string
+    name: string
+    description?: string
+    itemIds: string[]
+}
+
 export default function LLMComplianceSettings() {
     const { t } = useTranslation()
     const { isReady } = useWaitForI18n()
     const [rubrics, setRubrics] = useState<ComplianceRubric[]>([])
+    const [checklists, setChecklists] = useState<ComplianceChecklist[]>([])
     const [inherited, setInherited] = useState(false)
     const [loaded, setLoaded] = useState(false)
     const [disabled, setDisabled] = useState(false)
@@ -39,11 +49,21 @@ export default function LLMComplianceSettings() {
     const [saved, setSaved] = useState(false)
 
     const load = useCallback(() => {
-        getJSON<{ ok?: boolean; rubrics?: ComplianceRubric[]; inherited?: boolean }>(
+        getJSON<{ ok?: boolean; rubrics?: ComplianceRubric[]; checklists?: ComplianceChecklist[]; inherited?: boolean }>(
             '/user/llm/compliance',
         )
             .then(data => {
                 setRubrics(Array.isArray(data?.rubrics) ? data.rubrics : [])
+                setChecklists(
+                    Array.isArray(data?.checklists)
+                        ? data.checklists.map(c => ({
+                            id: c.id,
+                            name: c.name,
+                            description: c.description || '',
+                            itemIds: Array.isArray(c.itemIds) ? c.itemIds : [],
+                        }))
+                        : []
+                )
                 setInherited(!!data?.inherited)
                 setLoaded(true)
             })
@@ -74,15 +94,64 @@ export default function LLMComplianceSettings() {
         setRubrics(prev => prev.filter(r => r.id !== id))
     }
 
+    // overleaf-lab (2026-11-26): checklist curation helpers.
+    const addChecklist = () => {
+        const id = `checklist-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        setChecklists(prev => [...prev, { id, name: '', description: '', itemIds: [] }])
+    }
+
+    const updateChecklist = (
+        id: string,
+        field: 'name' | 'description',
+        value: string
+    ) => {
+        setChecklists(prev => prev.map(c => (c.id === id ? { ...c, [field]: value } : c)))
+    }
+
+    const removeChecklist = (id: string) => {
+        setChecklists(prev => prev.filter(c => c.id !== id))
+    }
+
+    const addItemToChecklist = (checklistId: string, rubricId: string) => {
+        if (!rubricId) return
+        setChecklists(prev =>
+            prev.map(c =>
+                c.id === checklistId && !c.itemIds.includes(rubricId)
+                    ? { ...c, itemIds: [...c.itemIds, rubricId] }
+                    : c
+            )
+        )
+    }
+
+    const removeItemFromChecklist = (checklistId: string, rubricId: string) => {
+        setChecklists(prev =>
+            prev.map(c =>
+                c.id === checklistId
+                    ? { ...c, itemIds: c.itemIds.filter(i => i !== rubricId) }
+                    : c
+            )
+        )
+    }
+
     const save = async () => {
         setSaveError(null)
         setSaving(true)
         setSaved(false)
         try {
             const data = await postJSON('/user/llm/compliance', {
-                body: { rubrics },
+                body: { rubrics, checklists },
             })
             setRubrics(Array.isArray(data?.rubrics) ? data.rubrics : rubrics)
+            if (Array.isArray(data?.checklists)) {
+                setChecklists(
+                    data.checklists.map((c: ComplianceChecklist) => ({
+                        id: c.id,
+                        name: c.name,
+                        description: c.description || '',
+                        itemIds: Array.isArray(c.itemIds) ? c.itemIds : [],
+                    }))
+                )
+            }
             setInherited(false)
             setSaving(false)
             setSaved(true)
@@ -207,10 +276,134 @@ export default function LLMComplianceSettings() {
                 </div>
             ))}
 
+            {/* overleaf-lab (2026-11-26): CHECKLISTS — group your check items into
+                named, ordered lists you can run as a whole from the review pane. */}
+            <div className="ol-llm-admin-settings__mt-lg">
+                <h3 className="ol-llm-admin-settings__section-title">
+                    {t('checklist_section_title', 'Checklists')}
+                </h3>
+                <p className="ol-llm-admin-settings__muted-md">
+                    {t(
+                        'checklist_help',
+                        'Group your check items into named checklists. Pick a checklist in the review pane to check the document against every item in it at once.',
+                    )}
+                </p>
+                {rubrics.length === 0 && (
+                    <p className="ol-llm-admin-settings__muted-md">
+                        {t(
+                            'checklist_needs_items',
+                            'Add at least one check item above to build a checklist.',
+                        )}
+                    </p>
+                )}
+                {checklists.length === 0 && rubrics.length > 0 && (
+                    <p className="ol-llm-admin-settings__muted-md">
+                        {t('checklist_empty', 'No checklists yet.')}
+                    </p>
+                )}
+
+                {checklists.map(checklist => {
+                    const chosen = checklist.itemIds
+                    const available = rubrics.filter(r => !chosen.includes(r.id))
+                    const nameOf = (id: string) => rubrics.find(r => r.id === id)?.name || id
+                    return (
+                        <div key={checklist.id} className="ol-llm-admin-settings__rubric-card">
+                            <div className="ol-llm-admin-settings__row-end">
+                                <OLButton
+                                    variant="link"
+                                    size="sm"
+                                    type="button"
+                                    onClick={() => removeChecklist(checklist.id)}
+                                >
+                                    <MaterialIcon type="delete" className="me-1 ol-llm-admin-settings__icon-base" />
+                                    {t('remove_checklist', 'Remove checklist')}
+                                </OLButton>
+                            </div>
+                            <OLFormGroup controlId={`llm-checklist-name-${checklist.id}`}>
+                                <OLFormLabel>{t('checklist_name', 'Checklist name')}</OLFormLabel>
+                                <OLFormControl
+                                    type="text"
+                                    value={checklist.name}
+                                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                        updateChecklist(checklist.id, 'name', e.target.value)
+                                    }
+                                    placeholder={t('checklist_name_placeholder', 'e.g. Submission day checklist')}
+                                />
+                            </OLFormGroup>
+                            <OLFormGroup controlId={`llm-checklist-desc-${checklist.id}`} className="ol-llm-admin-settings__mb-sm">
+                                <OLFormLabel>{t('checklist_description', 'Description (optional)')}</OLFormLabel>
+                                <OLFormControl
+                                    type="text"
+                                    value={checklist.description || ''}
+                                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                        updateChecklist(checklist.id, 'description', e.target.value)
+                                    }
+                                />
+                            </OLFormGroup>
+                            <div className="ol-llm-admin-settings__mb-sm">
+                                <OLFormLabel>
+                                    {t('checklist_items_label', 'Items in this checklist')}
+                                </OLFormLabel>
+                                {chosen.length === 0 ? (
+                                    <p className="ol-llm-admin-settings__muted-md">
+                                        {t('checklist_no_items', 'No items added yet.')}
+                                    </p>
+                                ) : (
+                                    <ul className="list-unstyled ol-llm-admin-settings__mb-sm" style={{ margin: 0 }}>
+                                        {chosen.map(itemId => (
+                                            <li
+                                                key={itemId}
+                                                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}
+                                            >
+                                                <MaterialIcon type="check" className="ol-llm-admin-settings__icon-base" />
+                                                <span style={{ flex: 1, minWidth: 0 }}>{nameOf(itemId)}</span>
+                                                <OLButton
+                                                    variant="link"
+                                                    size="sm"
+                                                    type="button"
+                                                    onClick={() => removeItemFromChecklist(checklist.id, itemId)}
+                                                >
+                                                    <MaterialIcon type="close" className="ol-llm-admin-settings__icon-base" />
+                                                </OLButton>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
+                                <select
+                                    className="form-select form-select-sm"
+                                    aria-label={t('checklist_add_item', 'Add an item')}
+                                    value=""
+                                    disabled={available.length === 0}
+                                    onChange={e => addItemToChecklist(checklist.id, e.target.value)}
+                                >
+                                    <option value="">
+                                        {available.length === 0
+                                            ? t('checklist_all_added', 'All items added')
+                                            : t('checklist_add_item', 'Add an item…')}
+                                    </option>
+                                    {available.map(r => (
+                                        <option key={r.id} value={r.id}>
+                                            {r.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                    )
+                })}
+
+                <div className="ol-llm-admin-settings__mt-md">
+                    <OLButton size="sm" variant="tertiary" type="button" onClick={addChecklist}>
+                        <MaterialIcon type="playlist_add" className="me-1 ol-llm-admin-settings__icon-base" />
+                        {t('add_checklist', 'Add checklist')}
+                    </OLButton>
+                </div>
+            </div>
+
             <div className="ol-llm-admin-settings__row-end ol-llm-admin-settings__mt-lg">
                 <OLButton size="sm" variant="tertiary" type="button" onClick={addRubric}>
                     <MaterialIcon type="add" className="me-1 ol-llm-admin-settings__icon-base" />
-                    {t('add_rubric', 'Add rubric')}
+                    {t('add_rubric', 'Add check item')}
                 </OLButton>
                 <span className="ol-llm-admin-settings__spacer-sm" />
                 <OLButton size="sm" variant="tertiary" type="button" onClick={resetToInherited}>

@@ -44,6 +44,11 @@ export default function AdminMenu({
           <NavDropdownLinkItem href="/admin/llm/settings">
             Manage Site LLM
           </NavDropdownLinkItem>
+          {/* overleaf-lab (2026-11-26, owner request): admin-only combined
+              LLM + MCP usage statistics page. */}
+          <NavDropdownLinkItem href="/admin/usage">
+            Usage Statistics
+          </NavDropdownLinkItem>
           <NavDropdownLinkItem href="/admin/user">
             Manage Users
           </NavDropdownLinkItem>

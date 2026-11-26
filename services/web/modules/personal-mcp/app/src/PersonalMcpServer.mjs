@@ -10,6 +10,7 @@ import { z } from "zod";
 import logger from "@overleaf/logger";
 import Metrics from "@overleaf/metrics";
 import { PERSONAL_MCP_WRITE_SCOPE } from "./PersonalMcpTokenManager.mjs";
+import { recordMcpUsage } from "./PersonalMcpUsage.mjs";
 
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const SERVER_INFO = {
@@ -257,6 +258,47 @@ const TOOL_ARG_SCHEMAS = {
 
 const WRITE_TOOL_NAMES = WRITE_TOOLS.map((tool) => tool.name);
 
+// overleaf-lab (2026-11-26, owner request): data-volume accounting. UTF-8 byte
+// length of a string, guarding against non-string input.
+function _byteLen(s) {
+  if (s == null) return 0;
+  const str = typeof s === "string" ? s : String(s);
+  try {
+    return Buffer.byteLength(str, "utf8");
+  } catch {
+    return str.length;
+  }
+}
+
+// Decoded byte size of a base64 payload without fully decoding it (base64 packs
+// 3 bytes per 4 chars, minus the '=' padding). Good enough for a volume meter.
+function _base64ByteLen(b64) {
+  if (typeof b64 !== "string" || b64.length === 0) return 0;
+  const stripped = b64.replace(/\s+/g, "");
+  const pad = stripped.endsWith("==") ? 2 : stripped.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((stripped.length * 3) / 4) - pad);
+}
+
+// Bytes of data actually moved by one tool call:
+//   * read tools  -> the payload returned to the client (serialized result)
+//   * create_doc / update_doc -> the document content written
+//   * upload_file -> the decoded file bytes uploaded
+//   * metadata writes (create_project / delete_doc / move_doc) -> 0
+function _movedBytes(name, args, out) {
+  if (WRITE_TOOL_NAMES.includes(name)) {
+    if (name === "upload_file") return _base64ByteLen(args?.content_base64);
+    if (name === "create_doc" || name === "update_doc")
+      return _byteLen(args?.content);
+    return 0;
+  }
+  // read tools: what we sent back over the wire.
+  try {
+    return _byteLen(JSON.stringify(out));
+  } catch {
+    return 0;
+  }
+}
+
 function _result(id, result) {
   return { status: 200, body: { jsonrpc: "2.0", id, result } };
 }
@@ -354,7 +396,7 @@ export function createDispatcher({ readService, writeService }) {
   // answers 202 Accepted with no body). The scope must be the value stored on
   // the authenticated token; anything else (undefined, 'read', garbage)
   // behaves exactly like the legacy read-only token.
-  return async function dispatch(userId, message, scope) {
+  return async function dispatch(userId, message, scope, tokenId) {
     const canWrite = scope === PERSONAL_MCP_WRITE_SCOPE && writeService != null;
 
     if (
@@ -415,6 +457,15 @@ export function createDispatcher({ readService, writeService }) {
             tool: _toolLabel(name),
             status: "error",
           });
+          // overleaf-lab: count the failed call (no data moved), non-fatal.
+          recordMcpUsage({
+            userId,
+            tokenId,
+            tool: _toolLabel(name),
+            direction: WRITE_TOOL_NAMES.includes(name) ? "write" : "read",
+            bytes: 0,
+            ok: false,
+          });
           if (err instanceof z.ZodError) {
             return _toolError(id, "Invalid arguments for this tool.");
           }
@@ -455,6 +506,16 @@ export function createDispatcher({ readService, writeService }) {
           { userId, tool: _toolLabel(name) },
           "personal-mcp: tool call ok",
         );
+        // overleaf-lab (2026-11-26, owner request): record data volume moved by
+        // this successful call (read payload out / write payload in), non-fatal.
+        recordMcpUsage({
+          userId,
+          tokenId,
+          tool: _toolLabel(name),
+          direction: WRITE_TOOL_NAMES.includes(name) ? "write" : "read",
+          bytes: _movedBytes(name, params?.arguments, out),
+          ok: true,
+        });
         return _result(id, {
           content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
           isError: false,
@@ -472,9 +533,10 @@ export function createMcpMiddleware(dispatch) {
   return async function handleMcp(req, res) {
     // The transport only ever passes the token-derived user id and scope down.
     const userId = req.user_id;
+    const tokenId = req.personal_mcp_token_id;
     let outcome;
     try {
-      outcome = await dispatch(userId, req.body, req.user_scope);
+      outcome = await dispatch(userId, req.body, req.user_scope, tokenId);
     } catch (err) {
       logger.error({ err, userId }, "personal-mcp: request handling failed");
       return res.status(500).json({ error: "internal_error" });

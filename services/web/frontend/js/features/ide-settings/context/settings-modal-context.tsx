@@ -86,7 +86,11 @@ export const SettingsModalProvider: FC<React.PropsWithChildren> = ({
   children,
 }) => {
   const { t } = useTranslation()
-  const { isOverleaf } = getMeta('ol-ExposedSettings')
+  // overleaf-lab: expose the LLM feature flags so the Settings menu can offer
+  // direct links to the user's AI Settings (BYO providers) and Compliance Review
+  // (check item / checklist) config pages.
+  const { isOverleaf, llmEnabled, llmAllowUserSettings } =
+    getMeta('ol-ExposedSettings')
   const { overallTheme, floatingMenu } = useProjectSettingsContext()
   const [settingToFocus, setSettingToFocus] = useState<string | undefined>(
     undefined
@@ -318,6 +322,22 @@ export const SettingsModalProvider: FC<React.PropsWithChildren> = ({
       },
 
       {
+        key: 'ai_settings',
+        title: t('ai_settings', 'AI Settings'),
+        icon: 'smart_toy',
+        href: '/user/llm-settings',
+        hidden: !llmAllowUserSettings,
+      },
+
+      {
+        key: 'compliance_review',
+        title: t('compliance_review', 'Compliance Review'),
+        icon: 'check_circle',
+        href: '/user/compliance-review',
+        hidden: !llmEnabled,
+      },
+
+      {
         key: 'account_settings',
         title: t('account_settings'),
         icon: 'settings',
@@ -340,6 +360,8 @@ export const SettingsModalProvider: FC<React.PropsWithChildren> = ({
       spellcheckExtraSections,
       hasToolbarMigration,
       floatingMenu,
+      llmEnabled,
+      llmAllowUserSettings,
     ]
   )
 

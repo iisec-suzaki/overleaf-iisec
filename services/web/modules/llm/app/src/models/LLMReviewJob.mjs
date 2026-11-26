@@ -23,6 +23,11 @@ const LLMReviewJobSchema = new Schema(
         userId: { type: String, required: true, index: true },
         rubricId: { type: String, default: '' },
         rubricName: { type: String, default: '' },
+        // overleaf-lab (2026-11-26): 'item' = a single check item (default, the
+        // historical path); 'checklist' = a whole curated list (checklistId set,
+        // rubricId empty). Added additively — existing docs read back as 'item'.
+        scopeKind: { type: String, enum: ['item', 'checklist'], default: 'item' },
+        checklistId: { type: String, default: '' },
         modelOverride: { type: String, default: null },
         status: {
             type: String,
@@ -62,6 +67,8 @@ function snapshotOf(job) {
         userId: job.userId,
         rubricId: job.rubricId || '',
         rubricName: job.rubricName || '',
+        scopeKind: job.scopeKind === 'checklist' ? 'checklist' : 'item',
+        checklistId: job.checklistId || '',
         modelOverride: job.modelOverride || null,
         status: job.status,
         result: job.result || null,

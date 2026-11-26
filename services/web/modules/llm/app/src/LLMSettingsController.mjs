@@ -31,7 +31,7 @@ import { User } from '../../../../app/src/models/User.mjs'
 import { expressify } from '@overleaf/promise-utils'
 import { encryptSecret, normalizeStoredSecret, storedToPlaintext } from './LLMCrypto.mjs'
 import { normalizeProviderSpec, chatText, listModels, detectProviderType, PROVIDER_TYPES, assertPublicLlmBaseUrl } from './LLMClient.mjs'
-import { sanitizeComplianceRubrics, validateComplianceRubrics, getComplianceRubrics, getLLMFeatureFlags } from './LLMAdminController.mjs'
+import { sanitizeComplianceRubrics, validateComplianceRubrics, sanitizeComplianceChecklists, getComplianceRubrics, getLLMFeatureFlags } from './LLMAdminController.mjs'
 // overleaf-lab (rubric sharing prototype, 2026-11-26): deployment-wide gallery
 import {
     newShareId,
@@ -730,6 +730,14 @@ export async function getComplianceRubricsForUser(userId) {
     return getComplianceRubrics()
 }
 
+// overleaf-lab (2026-11-26): the user's own compliance checklists. Unlike the
+// rubrics there is no deployment-wide default — a checklist only exists once a
+// user curates one — so this is always the personal list (or an empty array).
+export async function getComplianceChecklistsForUser(userId) {
+    const userDoc = await User.findOne({ _id: userId }).lean().catch(() => null)
+    return Array.isArray(userDoc?.llmComplianceChecklists) ? userDoc.llmComplianceChecklists : []
+}
+
 async function getUserCompliance(req, res) {
     const userId = SessionManager.getLoggedInUserId(req.session)
     if (!userId) {
@@ -737,12 +745,13 @@ async function getUserCompliance(req, res) {
     }
     const flags = await getLLMFeatureFlags()
     if (!flags.reviewEnabled) {
-        return res.json({ ok: true, rubrics: [], inherited: false })
+        return res.json({ ok: true, rubrics: [], checklists: [], inherited: false })
     }
     const rubrics = await getComplianceRubricsForUser(userId)
+    const checklists = await getComplianceChecklistsForUser(userId)
     const userDoc = await User.findOne({ _id: userId }).lean()
     const inherited = !(Array.isArray(userDoc?.llmComplianceRubrics) && userDoc.llmComplianceRubrics.length)
-    res.json({ ok: true, rubrics, inherited })
+    res.json({ ok: true, rubrics, checklists, inherited })
 }
 
 async function saveUserCompliance(req, res) {
@@ -763,8 +772,19 @@ async function saveUserCompliance(req, res) {
     if (problem) {
         return res.status(400).json({ ok: false, error: 'bad-request', message: problem })
     }
-    await User.updateOne({ _id: userId }, { $set: { llmComplianceRubrics: sanitized } })
-    res.json({ ok: true, rubrics: sanitized })
+    const sets = { llmComplianceRubrics: sanitized }
+    // overleaf-lab (2026-11-26): checklists ride the same settings round-trip.
+    // An absent body.checklists leaves the stored lists untouched (null from the
+    // sanitizer means "not provided"), so older clients never wipe them.
+    if (req.body && 'checklists' in req.body) {
+        const sanitizedLists = sanitizeComplianceChecklists(req.body.checklists)
+        if (sanitizedLists === null) {
+            return res.status(400).json({ ok: false, error: 'bad-request', message: 'Invalid checklists' })
+        }
+        sets.llmComplianceChecklists = sanitizedLists
+    }
+    await User.updateOne({ _id: userId }, { $set: sets })
+    res.json({ ok: true, rubrics: sanitized, checklists: sets.llmComplianceChecklists })
 }
 
 // ============================================================================
@@ -930,6 +950,31 @@ async function rubricGalleryPage(req, res) {
     )
 }
 
+// overleaf-lab (2026-11-26, owner request): the Compliance Review (check item +
+// checklist) configuration now lives on its OWN page (/user/compliance-review),
+// split out of the BYO /user/llm-settings page. It is gated by login only (the
+// same as the gallery), NOT by LLM_ALLOW_USER_SETTINGS — configuring check items
+// does not require BYO providers; it only needs the review feature. The page
+// component drives all data through the /user/llm/compliance JSON routes, which
+// self-gate on the feature flag, so here we only pass the review-enabled hint.
+async function compliancePage(req, res) {
+    const userId = SessionManager.getLoggedInUserId(req.session)
+    const userDoc = userId ? await User.findOne({ _id: userId }).lean() : null
+    const flags = await getLLMFeatureFlags()
+    const context = {
+        user: {
+            firstName: userDoc?.first_name || '',
+            lastName: userDoc?.last_name || '',
+            email: userDoc?.email || '',
+        },
+        reviewEnabled: !!flags.reviewEnabled,
+    }
+    res.render(
+        new URL('../../app/views/llm-compliance.pug', import.meta.url).pathname,
+        context,
+    )
+}
+
 
 // overleaf-lab (usage meter): the user's own token accounting for /user/llm-settings.
 async function userUsageSummary(req, res) {
@@ -971,6 +1016,7 @@ export default {
     saveUserCompliance: expressify(saveUserCompliance),
     // overleaf-lab (rubric sharing prototype, 2026-11-26): shared rubric gallery
     rubricGalleryPage, // sync render - must NOT be expressified
+    compliancePage, // sync render - must NOT be expressified
     getSharedCompliance: expressify(getSharedCompliance),
     publishSharedCompliance: expressify(publishSharedCompliance),
     importSharedCompliance: expressify(importSharedCompliance),

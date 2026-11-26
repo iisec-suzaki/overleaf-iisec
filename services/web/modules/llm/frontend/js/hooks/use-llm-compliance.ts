@@ -12,6 +12,14 @@ export interface ComplianceRubric {
     name: string
 }
 
+// overleaf-lab (2026-11-26): a curated checklist the reviewer can run as a whole.
+// The hook only needs id/name (plus a count for the chooser label).
+export interface ComplianceChecklist {
+    id: string
+    name: string
+    itemCount: number
+}
+
 export type ComplianceStatus = 'ok' | 'partial' | 'missing' | 'na'
 
 export interface ComplianceItem {
@@ -82,6 +90,7 @@ export interface ComplianceErrorInfo {
 
 interface RubricsResponse {
     rubrics?: ComplianceRubric[]
+    checklists?: ComplianceChecklist[]
 }
 
 // overleaf-lab: escape user/model text before embedding it in the HTML report.
@@ -181,7 +190,10 @@ export const useLLMCompliance = () => {
 
     const [rubrics, setRubrics] = useState<ComplianceRubric[]>([])
     const [rubricsLoaded, setRubricsLoaded] = useState(false)
-    const [selectedRubricId, setSelectedRubricId] = useState('')
+    // overleaf-lab (2026-11-26): the reviewer runs EITHER one check item or a whole
+    // checklist. One chooser, one scope string encoded as `item:<id>` / `checklist:<id>`.
+    const [checklists, setChecklists] = useState<ComplianceChecklist[]>([])
+    const [selectedScope, setSelectedScope] = useState('')
     // overleaf-lab (owner request 2026-08-25): the Review tab uses the ONE
     // shared model selection — see use-llm-model-selection (the "Select LLM
     // Model" dialog). No per-pane model state here.
@@ -253,8 +265,16 @@ export const useLLMCompliance = () => {
                 if (cancelled) return
 
                 const loadedRubrics = data.rubrics || []
+                const loadedChecklists = data.checklists || []
                 setRubrics(loadedRubrics)
-                setSelectedRubricId(loadedRubrics[0]?.id || '')
+                setChecklists(loadedChecklists)
+                setSelectedScope(
+                    loadedRubrics[0]?.id
+                        ? `item:${loadedRubrics[0].id}`
+                        : loadedChecklists[0]?.id
+                          ? `checklist:${loadedChecklists[0].id}`
+                          : ''
+                )
                 setRubricsLoaded(true)
             } catch (err) {
                                 if (cancelled) return
@@ -389,7 +409,14 @@ export const useLLMCompliance = () => {
 
     const runReview = useCallback(
         async (modelOverride?: string) => {
-            if (!selectedRubricId) return
+            if (!selectedScope) return
+            // Decode the chooser value into the run scope the backend expects.
+            const sep = selectedScope.indexOf(':')
+            const kind = sep === -1 ? 'item' : selectedScope.slice(0, sep)
+            const targetId = sep === -1 ? selectedScope : selectedScope.slice(sep + 1)
+            if (!targetId) return
+            const scopeBody =
+                kind === 'checklist' ? { checklistId: targetId } : { rubricId: targetId }
 
             setResult(null)
             setErrorInfo(null)
@@ -402,7 +429,7 @@ export const useLLMCompliance = () => {
                     `/project/${projectId}/llm/compliance/start`,
                     {
                         body: {
-                            rubricId: selectedRubricId,
+                            ...scopeBody,
                             // overleaf-lab: model selector — explicit model ref
                             // or omitted = deployment default.
                             ...(modelOverride ? { model: modelOverride } : {}),
@@ -427,7 +454,7 @@ export const useLLMCompliance = () => {
             setErrorInfo({ errorCode: 'failed', message: 'Request failed' })
             setPhase('error')
         }
-    }, [projectId, selectedRubricId, startPolling])
+    }, [projectId, selectedScope, startPolling])
 
     const cancelReview = useCallback(async () => {
         const jobId = jobIdRef.current
@@ -509,10 +536,11 @@ export const useLLMCompliance = () => {
 
     return {
         rubrics,
+        checklists,
         rubricsLoaded,
         hasRubrics: rubrics.length > 0,
-        selectedRubricId,
-        setSelectedRubricId,
+        selectedScope,
+        setSelectedScope,
         phase,
         position,
         progress,

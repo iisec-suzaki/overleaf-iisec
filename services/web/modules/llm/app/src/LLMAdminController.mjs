@@ -1,7 +1,9 @@
 import logger from '@overleaf/logger'
 import fs from 'node:fs'
 import path from 'node:path'
-import { getUsageSummary } from './LLMUsage.mjs'; // overleaf-lab (usage meter)
+import { getUsageSummary, getUsageByUser } from './LLMUsage.mjs'; // overleaf-lab (usage meter)
+import { summarizeByUser as summarizeMcpByUser } from '../../../personal-mcp/app/src/PersonalMcpUsage.mjs'; // overleaf-lab (2026-11-26): MCP volume for /admin/usage
+import { User } from '../../../../app/src/models/User.mjs' // overleaf-lab (2026-11-26): resolve userId -> email on /admin/usage
 import { z } from 'zod'
 import { expressify } from '@overleaf/promise-utils'
 import { encryptSecret, decryptSecret } from './LLMCrypto.mjs' // overleaf-lab: at-rest encryption of admin API key
@@ -402,6 +404,33 @@ export function sanitizeComplianceRubrics(list) {
     .slice(0, 50)
 }
 
+// overleaf-lab (2026-11-26): sanitizes a checklist list — each entry is a named,
+// ordered set of the user's own check-item ids. Drops entries without id/name,
+// trims text fields, dedups itemIds (preserving order), caps the list. Returns
+// null when `list` is not an array (caller keeps the existing value).
+export function sanitizeComplianceChecklists(list) {
+  if (!Array.isArray(list)) return null
+  return list
+    .map(c => {
+      const seen = new Set()
+      const itemIds = []
+      for (const raw of Array.isArray(c && c.itemIds) ? c.itemIds : []) {
+        const id = String(raw || '')
+        if (!id || seen.has(id)) continue
+        seen.add(id)
+        itemIds.push(id)
+      }
+      return {
+        id: String((c && c.id) || ''),
+        name: String((c && c.name) || '').slice(0, 200),
+        description: String((c && c.description) || '').slice(0, 1000),
+        itemIds: itemIds.slice(0, 200),
+      }
+    })
+    .filter(c => c.id && c.name)
+    .slice(0, 25)
+}
+
 // overleaf-lab: validates each rubric's scan patterns ("Label :: regex" per
 // line) so a broken regex fails at SAVE time, not as a silently hint-less
 // review. Returns the first error message, or null when everything parses
@@ -411,7 +440,7 @@ export function validateComplianceRubrics(list) {
   for (const r of list) {
     const patternsText = r && typeof r.scanPatterns === 'string' ? r.scanPatterns : ''
     if (patternsText.length > 4000) {
-      return `Scan patterns of rubric "${(r && r.name) || '?'}" must be 4000 characters or fewer`
+      return `Scan patterns of check item "${(r && r.name) || '?'}" must be 4000 characters or fewer`
     }
     for (const rawLine of patternsText.split('\n')) {
       const line = rawLine.trim()
@@ -423,13 +452,13 @@ export function validateComplianceRubrics(list) {
       // per review run (admin AND user supplied); a few-kilobyte pattern is
       // already pathological and a ReDoS candidate.
       if (body.length > 200) {
-        return `Scan pattern in rubric "${(r && r.name) || '?'}" is too long (max 200 characters)`
+        return `Scan pattern in check item "${(r && r.name) || '?'}" is too long (max 200 characters)`
       }
       try {
         // eslint-disable-next-line no-new
         new RegExp(body, 'i')
       } catch (err) {
-        return `Invalid scan pattern regex in rubric "${(r && r.name) || '?'}": ${body.slice(0, 80)}`
+        return `Invalid scan pattern regex in check item "${(r && r.name) || '?'}": ${body.slice(0, 80)}`
       }
     }
   }
@@ -552,11 +581,101 @@ async function usageSummary(req, res) {
     res.json({ ok: false, error: 'unavailable' })
   }
 }
+
+// overleaf-lab (2026-11-26, owner request): admin-only "who uses LLM & MCP, and
+// how much" page. Site-admin gate lives on the route (ensureUserIsSiteAdmin).
+async function usageAdminPage(req, res) {
+  const pugPath = new URL('../../app/views/llm-usage-admin.pug', import.meta.url).pathname
+  res.render(pugPath, { isWebsiteRedesign: true })
+}
+
+// Combine per-user LLM token usage and MCP data volume into one report. Both
+// aggregates are non-fatal; a missing store just yields zeros for that column.
+async function usageReport(req, res) {
+  const days = parseInt(req.query.days, 10)
+  const window = Number.isFinite(days) ? days : 30
+  const [llm, mcp] = await Promise.all([
+    getUsageByUser({ days: window }),
+    summarizeMcpByUser({ days: window }),
+  ])
+
+  // Merge on userId. LLM stores userId=null for site/admin-scope calls; we keep
+  // those under the '' key and label them as site/admin below.
+  const byId = new Map()
+  const touch = (userId) => {
+    if (!byId.has(userId)) {
+      byId.set(userId, {
+        userId: userId || '',
+        email: '', name: '',
+        llmCalls: 0, llmTokens: 0, llmInputTokens: 0, llmOutputTokens: 0,
+        mcpCalls: 0, mcpReadBytes: 0, mcpWriteBytes: 0, mcpTotalBytes: 0,
+      })
+    }
+    return byId.get(userId)
+  }
+  for (const u of llm?.users || []) {
+    const row = touch(u.userId)
+    row.llmCalls = u.calls
+    row.llmInputTokens = u.inputTokens
+    row.llmOutputTokens = u.outputTokens
+    row.llmTokens = u.totalTokens
+  }
+  for (const m of mcp?.users || []) {
+    const row = touch(m.userId)
+    row.mcpCalls = m.calls
+    row.mcpReadBytes = m.readBytes
+    row.mcpWriteBytes = m.writeBytes
+    row.mcpTotalBytes = m.totalBytes
+  }
+
+  // Resolve emails / display names for the (bounded) set of real user ids.
+  const realIds = [...byId.keys()].filter(id => id && /^[a-f0-9]{24}$/i.test(id))
+  if (realIds.length) {
+    try {
+      const docs = await User.find(
+        { _id: { $in: realIds } },
+        { email: 1, first_name: 1, last_name: 1 },
+      ).lean()
+      for (const d of docs) {
+        const row = byId.get(String(d._id))
+        if (row) {
+          row.email = d.email || ''
+          row.name = [d.first_name, d.last_name].filter(Boolean).join(' ').trim()
+        }
+      }
+    } catch (err) {
+      logger.debug({ err }, '[LLM] /admin/usage email resolution failed (non-fatal)')
+    }
+  }
+
+  const rows = [...byId.values()]
+    .sort((a, b) => (b.llmTokens + b.mcpTotalBytes) - (a.llmTokens + a.mcpTotalBytes))
+    .map(r => ({
+      ...r,
+      label: r.email || (r.userId ? 'Unknown user' : 'Site / admin'),
+    }))
+
+  res.json({
+    ok: true,
+    days: window,
+    rows,
+    totals: {
+      llmCalls: llm?.totals?.calls || 0,
+      llmTokens: llm?.totals?.totalTokens || 0,
+      mcpCalls: mcp?.totals?.calls || 0,
+      mcpReadBytes: mcp?.totals?.readBytes || 0,
+      mcpWriteBytes: mcp?.totals?.writeBytes || 0,
+      mcpTotalBytes: mcp?.totals?.totalBytes || 0,
+    },
+  })
+}
 export default {
   adminSettingsPage: expressify(adminSettingsPage),
   getAdminSettings: expressify(getAdminSettings),
   saveAdminSettings: expressify(saveAdminSettings),
   checkAdminLLMConnection: expressify(checkAdminLLMConnection),
   scanAdminModels: expressify(scanAdminModels),  usageSummary: expressify(usageSummary),
+  usageAdminPage: expressify(usageAdminPage),
+  usageReport: expressify(usageReport),
 
 }

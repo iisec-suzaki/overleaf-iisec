@@ -4,7 +4,7 @@ import { expressify } from '@overleaf/promise-utils'
 import SessionManager from '../../../../app/src/Features/Authentication/SessionManager.mjs'
 import ProjectEntityHandler from '../../../../app/src/Features/Project/ProjectEntityHandler.mjs'
 import { getAdminLLMSettings, getLLMFeatureFlags, getLLMPrompts } from './LLMAdminController.mjs'
-import { getComplianceRubricsForUser } from './LLMSettingsController.mjs' // overleaf-lab (2026-08-27): user-scoped rubrics
+import { getComplianceRubricsForUser, getComplianceChecklistsForUser } from './LLMSettingsController.mjs' // overleaf-lab (2026-08-27): user-scoped rubrics
 import OError from '@overleaf/o-error'
 import { chatText, chatObject, listModels as listModelsSdk, normalizeProviderSpec } from './LLMClient.mjs' // overleaf-lab: AI-SDK provider seam (PR item 4: provider-agnostic review passes)
 // overleaf-lab: Review-tab model selector — resolve an explicit model ref (site
@@ -802,6 +802,48 @@ function jobsAhead(jobId) {
 // message, ... } for a logical failure (too_long / model_unavailable /
 // empty_document). Throws on an HTTP/parse failure or an abort (cancel or the
 // review timeout); processQueue maps those to the 'cancelled' or 'failed' state.
+// overleaf-lab (2026-11-26): resolve the run scope for a job into ONE effective
+// rubric plus the requirement passes to loop over. A single CHECK ITEM resolves
+// to itself — the behaviour is byte-identical to before. A CHECKLIST folds its
+// items into one review: each item's guidelines are split independently (so a
+// prose-only item still counts as a requirement instead of being dropped by a
+// combined split) and every resulting requirement is tagged with its item name;
+// the items' scan patterns are concatenated. splitRubric and the per-requirement
+// model loop below stay untouched, so a checklist run behaves exactly like a
+// longer single item.
+async function resolveReviewScope(userId, job) {
+    const rubrics = await getComplianceRubricsForUser(userId)
+    if (job.scopeKind === 'checklist') {
+        const checklists = await getComplianceChecklistsForUser(userId)
+        const checklist = checklists.find((c) => c.id === job.checklistId)
+        if (!checklist) return null
+        const itemMap = new Map(rubrics.map((r) => [r.id, r]))
+        const items = (checklist.itemIds || []).map((id) => itemMap.get(id)).filter(Boolean)
+        if (!items.length) return null
+        const guidelines = items
+            .map((it) => `## ${it.name}\n${String(it.guidelines || '').trim()}`)
+            .join('\n\n')
+        const scanPatterns = items
+            .map((it) => String(it.scanPatterns || '').trim())
+            .filter(Boolean)
+            .join('\n')
+        const rubric = { id: checklist.id, name: checklist.name, guidelines, scanPatterns }
+        const requirements = []
+        for (const it of items) {
+            const split = splitRubric(it.guidelines)
+            for (const r of split.requirements) {
+                if (r && r.trim()) requirements.push(`【${it.name}】 ${r.trim()}`)
+            }
+        }
+        if (!requirements.length) requirements.push(String(rubric.guidelines))
+        return { rubric, preamble: '', requirements }
+    }
+    const rubric = rubrics.find((r) => r.id === job.rubricId)
+    if (!rubric) return null
+    const split = splitRubric(rubric.guidelines)
+    return { rubric, preamble: split.preamble, requirements: split.requirements }
+}
+
 async function performReview(job) {
     currentUsageMeta = {
         userId: job.userId,
@@ -811,14 +853,19 @@ async function performReview(job) {
     } // overleaf-lab (usage meter)
     const { projectId, userId } = job
 
-    // overleaf-lab: resolve the rubric fresh at run time (the job only stores id and
-    // name) so the guidelines text is current when the job finally runs.
-    // overleaf-lab (2026-08-27): from the USER's rubric set (own or inherited).
-    const rubrics = await getComplianceRubricsForUser(userId)
-    const rubric = rubrics.find(r => r.id === job.rubricId)
-    if (!rubric) {
-        throw new Error('Rubric is no longer available')
+    // overleaf-lab: resolve the review scope fresh at run time (the job only
+    // stores ids and name) so the guidelines text is current when the job finally
+    // runs. overleaf-lab (2026-11-26): handles both a single check item and a
+    // whole checklist; a checklist folds its items into one effective rubric.
+    const scope = await resolveReviewScope(userId, job)
+    if (!scope) {
+        throw new Error(
+            job.scopeKind === 'checklist'
+                ? 'This checklist or its check items are no longer available'
+                : 'This check item is no longer available'
+        )
     }
+    const rubric = scope.rubric
 
     // overleaf-lab (2026-08-27): the ONE shared model resolution — explicit
     // job override > user's profile selection > first BYO row > site backend.
@@ -897,7 +944,9 @@ async function performReview(job) {
     // overleaf-lab: split the rubric into one requirement per pass (numbered/bulleted
     // lines; prose degrades to a single pass over the whole text). Resolved fresh per
     // job, so editing the rubric in the admin UI changes the NEXT review's pass count.
-    const { preamble, requirements } = splitRubric(rubric.guidelines)
+    // overleaf-lab (2026-11-26): scope.requirements already carries the per-item
+    // labelled passes for a checklist run (and the single-item split otherwise).
+    const { preamble, requirements } = scope
 
     // Context-window guard. Budget the WHOLE prompt against the configured context
     // window: document + rubric guidelines + system prompt + room for the JSON
@@ -1717,8 +1766,16 @@ async function getRubrics(req, res) {
     // deployment-wide set.
     const userId = SessionManager.getLoggedInUserId(req.session)
     const rubrics = await getComplianceRubricsForUser(userId)
+    // overleaf-lab (2026-11-26): also offer the user's curated checklists so the
+    // reviewer's single chooser can run a whole list. Names only, never guidelines.
+    const checklists = await getComplianceChecklistsForUser(userId)
     // overleaf-lab: expose names only, never the guidelines text, to the project UI.
-    res.json({ rubrics: rubrics.map(r => ({ id: r.id, name: r.name })) })
+    res.json({
+        rubrics: rubrics.map(r => ({ id: r.id, name: r.name })),
+        checklists: checklists
+            .filter(c => Array.isArray(c.itemIds) && c.itemIds.length)
+            .map(c => ({ id: c.id, name: c.name, itemCount: c.itemIds.length })),
+    })
 }
 
 // overleaf-lab: enqueue a review and return its job id. Always answers HTTP 200;
@@ -1738,17 +1795,36 @@ async function startReview(req, res) {
     // 2. Request context.
     const projectId = req.params.Project_id
     const userId = SessionManager.getLoggedInUserId(req.session)
-    const { rubricId, model: requestedModel } = req.body || {}
+    const { rubricId, checklistId, model: requestedModel } = req.body || {}
+    // overleaf-lab (2026-11-26): the reviewer runs EITHER one check item OR a whole
+    // checklist; the body carries rubricId or checklistId accordingly.
+    const scopeKind = typeof checklistId === 'string' && checklistId.trim() ? 'checklist' : 'item'
 
-    logger.debug({ projectId, userId, rubricId }, '[LLM] compliance: start requested')
+    logger.debug({ projectId, userId, rubricId, checklistId, scopeKind }, '[LLM] compliance: start requested')
 
-    // 3. Resolve the requested rubric (capture its name for the job).
-    // overleaf-lab (2026-08-27): from the USER's own rubrics (fall back to the
-    // deployment-wide set) — rubrics are per-user now, not global.
+    // 3. Resolve the run target (capture its name for the job).
+    // overleaf-lab (2026-08-27): from the USER's own items (fall back to the
+    // deployment-wide set) — check items are per-user now, not global.
     const rubrics = await getComplianceRubricsForUser(userId)
-    const rubric = rubrics.find(r => r.id === rubricId)
-    if (!rubric) {
-        return res.json({ ok: false, error: 'no_rubric', message: 'Unknown or missing rubric' })
+    let displayName = ''
+    if (scopeKind === 'checklist') {
+        const checklists = await getComplianceChecklistsForUser(userId)
+        const checklist = checklists.find((c) => c.id === checklistId.trim())
+        if (!checklist) {
+            return res.json({ ok: false, error: 'no_rubric', message: 'Unknown or missing checklist' })
+        }
+        const haveItem = new Set(rubrics.map((r) => r.id))
+        const runnable = (checklist.itemIds || []).filter((id) => haveItem.has(id))
+        if (!runnable.length) {
+            return res.json({ ok: false, error: 'no_rubric', message: 'This checklist has no available check items' })
+        }
+        displayName = checklist.name
+    } else {
+        const rubric = rubrics.find((r) => r.id === rubricId)
+        if (!rubric) {
+            return res.json({ ok: false, error: 'no_rubric', message: 'Unknown or missing check item' })
+        }
+        displayName = rubric.name
     }
 
     // 4. A usable lane must exist: the user's selection / BYO row / site backend.
@@ -1798,8 +1874,13 @@ async function startReview(req, res) {
         id: newJobId(),
         projectId,
         userId,
-        rubricId,
-        rubricName: rubric.name,
+        // overleaf-lab (2026-11-26): scopeKind drives resolveReviewScope; a
+        // checklist run keeps rubricId empty and carries checklistId. rubricName is
+        // the display name (item name or checklist name) reused across reports.
+        scopeKind,
+        checklistId: scopeKind === 'checklist' ? checklistId.trim() : '',
+        rubricId: scopeKind === 'item' ? rubricId : '',
+        rubricName: displayName,
         // overleaf-lab: Review-tab model selector — explicit model ref
         // (site id or 'u:<rowId>:<model>'); null = deployment default.
         modelOverride: typeof requestedModel === 'string' && requestedModel.trim() ? requestedModel.trim().slice(0, 300) : null,

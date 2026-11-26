@@ -65,7 +65,7 @@ test('validateComplianceRubrics: invalid regex and over-long patterns are reject
     const badRegex = [{ name: 'r', scanPatterns: 'Broken :: (unclosed' }]
     assert.match(
         validateComplianceRubrics(badRegex),
-        /Invalid scan pattern regex in rubric "r"/,
+        /Invalid scan pattern regex in check item "r"/,
     )
     const tooLong = [{ name: 'r', scanPatterns: 'a'.repeat(4001) }]
     assert.match(

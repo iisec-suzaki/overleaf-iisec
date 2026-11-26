@@ -81,9 +81,10 @@ function LLMCompliancePane() {
     const { selected: selectedModel } = useLLMModelSelection()
     const {
         rubrics,
+        checklists,
         rubricsLoaded,
-        selectedRubricId,
-        setSelectedRubricId,
+        selectedScope,
+        setSelectedScope,
         phase,
         position,
         progress,
@@ -356,24 +357,40 @@ function LLMCompliancePane() {
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <select
                     className="form-select"
-                    value={selectedRubricId}
-                    onChange={e => setSelectedRubricId(e.target.value)}
+                    value={selectedScope}
+                    onChange={e => setSelectedScope(e.target.value)}
                     disabled={isActive}
-                    aria-label={t('review_rubric', 'Review rubric')}
+                    aria-label={t('review_scope', 'Review target')}
                     style={{ flex: 1, minWidth: 0 }}
                 >
-                    {rubrics.map(rubric => (
-                        <option key={rubric.id} value={rubric.id}>
-                            {rubric.name}
-                        </option>
-                    ))}
+                    {rubrics.length > 0 && (
+                        <optgroup label={t('scope_check_items', 'Check items')}>
+                            {rubrics.map(rubric => (
+                                <option key={`item:${rubric.id}`} value={`item:${rubric.id}`}>
+                                    {rubric.name}
+                                </option>
+                            ))}
+                        </optgroup>
+                    )}
+                    {checklists.length > 0 && (
+                        <optgroup label={t('scope_checklists', 'Checklists')}>
+                            {checklists.map(c => (
+                                <option
+                                    key={`checklist:${c.id}`}
+                                    value={`checklist:${c.id}`}
+                                >
+                                    {`${c.name} (${c.itemCount})`}
+                                </option>
+                            ))}
+                        </optgroup>
+                    )}
                 </select>
                 {showRunButton && (
                     <OLButton
                         variant="primary"
                         type="button"
                         onClick={() => runReview(selectedModel || undefined)}
-                        disabled={!selectedRubricId}
+                        disabled={!selectedScope}
                     >
                         <MaterialIcon type="fact_check" />{' '}
                         {t('run_review', 'Run review')}
