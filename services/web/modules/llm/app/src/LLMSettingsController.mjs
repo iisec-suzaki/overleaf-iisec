@@ -32,6 +32,16 @@ import { expressify } from '@overleaf/promise-utils'
 import { encryptSecret, normalizeStoredSecret, storedToPlaintext } from './LLMCrypto.mjs'
 import { normalizeProviderSpec, chatText, listModels, detectProviderType, PROVIDER_TYPES, assertPublicLlmBaseUrl } from './LLMClient.mjs'
 import { sanitizeComplianceRubrics, validateComplianceRubrics, getComplianceRubrics, getLLMFeatureFlags } from './LLMAdminController.mjs'
+// overleaf-lab (rubric sharing prototype, 2026-11-26): deployment-wide gallery
+import {
+    newShareId,
+    listSharedRubrics,
+    getSharedRubric,
+    upsertSharedRubric,
+    getShareOwner,
+    unpublishSharedRubric,
+    recordImport,
+} from './models/LLMRubricShare.mjs'
 import OError from '@overleaf/o-error'
 
 // overleaf-lab: hard cap on rows per user - keeps the editor model list and
@@ -757,6 +767,169 @@ async function saveUserCompliance(req, res) {
     res.json({ ok: true, rubrics: sanitized })
 }
 
+// ============================================================================
+// overleaf-lab (rubric sharing prototype, 2026-11-26, owner request): a
+// deployment-wide SHARED rubric gallery, modeled on the LaTeX template gallery.
+//
+// A user publishes a snapshot of one of their review items; anyone can browse
+// the gallery and copy an item into their own (personal) rubric list. The copy
+// then flows through the existing save path, so sharing never turns someone's
+// private rubrics into a live shared document.
+//
+//   GET  /user/llm/compliance/gallery        -> the standalone gallery page (pug)
+//   GET  /user/llm/compliance/shared         -> { ok, rubrics: [ ...isMine ] }
+//   POST /user/llm/compliance/shared         -> publish (body: name/guidelines/scanPatterns[, shareId])
+//   POST /user/llm/compliance/shared/import  -> { ok, rubric } a personal copy to append+save
+//   POST /user/llm/compliance/shared/:shareId/unpublish -> remove own share
+// ============================================================================
+
+function displayUserName(userDoc) {
+    const name = `${userDoc?.first_name || ''} ${userDoc?.last_name || ''}`.trim()
+    return name || userDoc?.email || 'Lab member'
+}
+
+function newLocalRubricId() {
+    return `rubric-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+async function getSharedCompliance(req, res) {
+    const userId = SessionManager.getLoggedInUserId(req.session)
+    if (!userId) {
+        return res.status(401).json({ ok: false, error: 'unauthorized', message: 'Login required' })
+    }
+    const flags = await getLLMFeatureFlags()
+    if (!flags.reviewEnabled) {
+        return res.json({ ok: true, rubrics: [] })
+    }
+    const rubrics = await listSharedRubrics({ query: req.query?.q })
+    for (const r of rubrics) r.isMine = r.ownerId === userId
+    res.json({ ok: true, rubrics })
+}
+
+async function publishSharedCompliance(req, res) {
+    const userId = SessionManager.getLoggedInUserId(req.session)
+    if (!userId) {
+        return res.status(401).json({ ok: false, error: 'unauthorized', message: 'Login required' })
+    }
+    const flags = await getLLMFeatureFlags()
+    if (!flags.reviewEnabled) {
+        return res.status(403).json({ ok: false, error: 'disabled', message: 'The compliance review feature is disabled' })
+    }
+    const body = req.body || {}
+    // Reuse the exact same hygiene as personal rubrics: same field caps, same
+    // "needs a name" filter, same scan-pattern validation. The placeholder id
+    // only satisfies the shared sanitize helper (it discards id upstream).
+    const sanitizedList = sanitizeComplianceRubrics([
+        {
+            id: 'share-src',
+            name: body.name,
+            guidelines: body.guidelines,
+            scanPatterns: body.scanPatterns,
+        },
+    ])
+    if (!sanitizedList || !sanitizedList.length) {
+        return res.status(400).json({ ok: false, error: 'bad-request', message: 'A shared rubric needs a name' })
+    }
+    const fields = sanitizedList[0]
+    const problem = validateComplianceRubrics([fields])
+    if (problem) {
+        return res.status(400).json({ ok: false, error: 'bad-request', message: problem })
+    }
+    // A shareId may be passed to update an existing share — but only your own.
+    let shareId = typeof body.shareId === 'string' && body.shareId ? body.shareId : undefined
+    if (shareId) {
+        const owner = await getShareOwner(shareId)
+        if (!owner) {
+            return res.status(404).json({ ok: false, error: 'not-found', message: 'Shared rubric not found' })
+        }
+        if (owner !== userId) {
+            return res.status(403).json({ ok: false, error: 'forbidden', message: 'You can only update your own shared rubric' })
+        }
+    }
+    const userDoc = await User.findOne({ _id: userId }).lean()
+    const share = await upsertSharedRubric({
+        shareId,
+        ownerId: userId,
+        ownerName: displayUserName(userDoc),
+        fields,
+    })
+    if (!share) {
+        return res.status(500).json({ ok: false, error: 'storage', message: 'Could not save the shared rubric' })
+    }
+    share.isMine = true
+    res.json({ ok: true, share })
+}
+
+async function importSharedCompliance(req, res) {
+    const userId = SessionManager.getLoggedInUserId(req.session)
+    if (!userId) {
+        return res.status(401).json({ ok: false, error: 'unauthorized', message: 'Login required' })
+    }
+    const flags = await getLLMFeatureFlags()
+    if (!flags.reviewEnabled) {
+        return res.status(403).json({ ok: false, error: 'disabled', message: 'The compliance review feature is disabled' })
+    }
+    const shareId = req.body?.shareId
+    if (!shareId || typeof shareId !== 'string') {
+        return res.status(400).json({ ok: false, error: 'bad-request', message: 'Missing shareId' })
+    }
+    const share = await getSharedRubric(shareId)
+    if (!share) {
+        return res.status(404).json({ ok: false, error: 'not-found', message: 'Shared rubric not found' })
+    }
+    // Hand back a PERSONAL copy with a fresh local id; the client appends it to
+    // the user's own list and saves (that path enforces caps + validation).
+    recordImport(shareId)
+    res.json({
+        ok: true,
+        rubric: {
+            id: newLocalRubricId(),
+            name: share.name,
+            guidelines: share.guidelines,
+            scanPatterns: share.scanPatterns,
+        },
+    })
+}
+
+async function unpublishSharedCompliance(req, res) {
+    const userId = SessionManager.getLoggedInUserId(req.session)
+    if (!userId) {
+        return res.status(401).json({ ok: false, error: 'unauthorized', message: 'Login required' })
+    }
+    const shareId = req.params?.shareId
+    if (!shareId) {
+        return res.status(400).json({ ok: false, error: 'bad-request', message: 'Missing shareId' })
+    }
+    const owner = await getShareOwner(shareId)
+    if (!owner) {
+        return res.status(404).json({ ok: false, error: 'not-found', message: 'Shared rubric not found' })
+    }
+    if (owner !== userId) {
+        return res.status(403).json({ ok: false, error: 'forbidden', message: 'You can only remove your own shared rubric' })
+    }
+    await unpublishSharedRubric(shareId, userId)
+    res.json({ ok: true })
+}
+
+// Standalone gallery page (sync render — must NOT be expressified).
+async function rubricGalleryPage(req, res) {
+    const userId = SessionManager.getLoggedInUserId(req.session)
+    const userDoc = userId ? await User.findOne({ _id: userId }).lean() : null
+    const flags = await getLLMFeatureFlags()
+    const context = {
+        user: {
+            firstName: userDoc?.first_name || '',
+            lastName: userDoc?.last_name || '',
+            email: userDoc?.email || '',
+        },
+        reviewEnabled: !!flags.reviewEnabled,
+    }
+    res.render(
+        new URL('../../app/views/llm-rubric-gallery.pug', import.meta.url).pathname,
+        context,
+    )
+}
+
 
 // overleaf-lab (usage meter): the user's own token accounting for /user/llm-settings.
 async function userUsageSummary(req, res) {
@@ -795,5 +968,11 @@ export default {
     saveFeatureModels: expressify(saveFeatureModels),
     // overleaf-lab (2026-08-27): user-scoped compliance review rubrics
     getUserCompliance: expressify(getUserCompliance),
-    saveUserCompliance: expressify(saveUserCompliance)
+    saveUserCompliance: expressify(saveUserCompliance),
+    // overleaf-lab (rubric sharing prototype, 2026-11-26): shared rubric gallery
+    rubricGalleryPage, // sync render - must NOT be expressified
+    getSharedCompliance: expressify(getSharedCompliance),
+    publishSharedCompliance: expressify(publishSharedCompliance),
+    importSharedCompliance: expressify(importSharedCompliance),
+    unpublishSharedCompliance: expressify(unpublishSharedCompliance),
 }
